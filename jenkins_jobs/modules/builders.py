@@ -3208,9 +3208,12 @@ def docker_build_publish(parse, xml_parent, data):
     :arg bool skip-decorate: Do not decorate the build name. (default false)
     :arg bool skip-tag-latest: Do not tag this build as latest. (default false)
     :arg bool skip-push: Do not push. (default false)
-    :arg str file-path: Path of the Dockerfile. (default '')
+    :arg str file-path: Project root of Dockerfile. (default '')
     :arg str build-context: Project root path for the build, defaults to the
         workspace if not specified. (default '')
+    :arg str credentials-id: ID of the credential to use. This is the last
+        field (a 32-digit hexadecimal code) of the path of URL visible after
+        you clicked the credential under Jenkins Global credentials. (optional)
 
     Example:
 
@@ -3242,6 +3245,12 @@ def docker_build_publish(parse, xml_parent, data):
         data.get('file-path', ''))
     XML.SubElement(db, 'buildContext').text = str(
         data.get('build-context', ''))
+
+    if (data.get('credentials-id')):
+        registry = XML.SubElement(db, 'registry')
+        registry.set('plugin', 'docker-commons')
+        XML.SubElement(registry, 'credentialsId').text = str(
+            data.get('credentials-id'))
 
 
 def build_name_setter(parser, xml_parent, data):
