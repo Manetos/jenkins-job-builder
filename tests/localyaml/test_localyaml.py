@@ -16,30 +16,26 @@
 
 import os
 
-from testscenarios.testcase import TestWithScenarios
 from testtools import ExpectedException
-from testtools import TestCase
 from yaml.composer import ComposerError
 
-from jenkins_jobs import builder
-from tests.base import get_scenarios
-from tests.base import JsonTestCase
-from tests.base import LoggingFixture
-from tests.base import YamlTestCase
+from jenkins_jobs.config import JJBConfig
+from jenkins_jobs.parser import YamlParser
+from tests import base
 
 
 def _exclude_scenarios(input_filename):
     return os.path.basename(input_filename).startswith("custom_")
 
 
-class TestCaseLocalYamlInclude(TestWithScenarios, JsonTestCase, TestCase):
+class TestCaseLocalYamlInclude(base.JsonTestCase):
     """
     Verify application specific tags independently of any changes to
     modules XML parsing behaviour
     """
     fixtures_path = os.path.join(os.path.dirname(__file__), 'fixtures')
-    scenarios = get_scenarios(fixtures_path, 'yaml', 'json',
-                              filter_func=_exclude_scenarios)
+    scenarios = base.get_scenarios(fixtures_path, 'yaml', 'json',
+                                   filter_func=_exclude_scenarios)
 
     def test_yaml_snippet(self):
 
@@ -51,16 +47,16 @@ class TestCaseLocalYamlInclude(TestWithScenarios, JsonTestCase, TestCase):
             super(TestCaseLocalYamlInclude, self).test_yaml_snippet()
 
 
-class TestCaseLocalYamlAnchorAlias(TestWithScenarios, YamlTestCase, TestCase):
+class TestCaseLocalYamlAnchorAlias(base.YamlTestCase):
     """
     Verify yaml input is expanded to the expected yaml output when using yaml
     anchors and aliases.
     """
     fixtures_path = os.path.join(os.path.dirname(__file__), 'fixtures')
-    scenarios = get_scenarios(fixtures_path, 'iyaml', 'oyaml')
+    scenarios = base.get_scenarios(fixtures_path, 'iyaml', 'oyaml')
 
 
-class TestCaseLocalYamlIncludeAnchors(LoggingFixture, TestCase):
+class TestCaseLocalYamlIncludeAnchors(base.BaseTestCase):
 
     fixtures_path = os.path.join(os.path.dirname(__file__), 'fixtures')
 
@@ -76,6 +72,11 @@ class TestCaseLocalYamlIncludeAnchors(LoggingFixture, TestCase):
         files = ["custom_same_anchor-001-part1.yaml",
                  "custom_same_anchor-001-part2.yaml"]
 
-        b = builder.Builder("http://example.com", "jenkins", None,
-                            plugins_list=[])
-        b.load_files([os.path.join(self.fixtures_path, f) for f in files])
+        jjb_config = JJBConfig()
+        jjb_config.jenkins['url'] = 'http://example.com'
+        jjb_config.jenkins['user'] = 'jenkins'
+        jjb_config.jenkins['password'] = 'password'
+        jjb_config.builder['plugins_info'] = []
+        jjb_config.validate()
+        j = YamlParser(jjb_config)
+        j.load_files([os.path.join(self.fixtures_path, f) for f in files])

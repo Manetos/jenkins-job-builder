@@ -28,7 +28,6 @@ the build is complete.
 import logging
 import pkg_resources
 import random
-import sys
 import xml.etree.ElementTree as XML
 
 import six
@@ -38,22 +37,10 @@ from jenkins_jobs.errors import JenkinsJobsException
 from jenkins_jobs.errors import MissingAttributeError
 import jenkins_jobs.modules.base
 from jenkins_jobs.modules import hudson_model
-from jenkins_jobs.modules.helpers import append_git_revision_config
-from jenkins_jobs.modules.helpers import artifactory_common_details
-from jenkins_jobs.modules.helpers import artifactory_deployment_patterns
-from jenkins_jobs.modules.helpers import artifactory_env_vars_patterns
-from jenkins_jobs.modules.helpers import artifactory_optional_props
-from jenkins_jobs.modules.helpers import build_trends_publisher
-from jenkins_jobs.modules.helpers import cloudformation_init
-from jenkins_jobs.modules.helpers import cloudformation_region_dict
-from jenkins_jobs.modules.helpers import cloudformation_stack
-from jenkins_jobs.modules.helpers import config_file_provider_settings
-from jenkins_jobs.modules.helpers import findbugs_settings
-from jenkins_jobs.modules.helpers import get_value_from_yaml_or_config_file
-from jenkins_jobs.modules.helpers import convert_mapping_to_xml
+import jenkins_jobs.modules.helpers as helpers
 
 
-def archive(parser, xml_parent, data):
+def archive(registry, xml_parent, data):
     """yaml: archive
     Archive build artifacts
 
@@ -85,7 +72,7 @@ def archive(parser, xml_parent, data):
     # backward compatibility
     latest_only = data.get('latest_only', False)
     if 'latest_only' in data:
-        logger.warn('latest_only is deprecated please use latest-only')
+        logger.warning('latest_only is deprecated please use latest-only')
     if 'latest-only' in data:
         latest_only = data['latest-only']
     if latest_only:
@@ -110,7 +97,7 @@ def archive(parser, xml_parent, data):
     default_excludes.text = str(data.get('default-excludes', True)).lower()
 
 
-def blame_upstream(parser, xml_parent, data):
+def blame_upstream(registry, xml_parent, data):
     """yaml: blame-upstream
     Notify upstream commiters when build fails
     Requires the Jenkins :jenkins-wiki:`Blame upstream commiters Plugin
@@ -127,7 +114,7 @@ def blame_upstream(parser, xml_parent, data):
                    'BlameUpstreamCommitersPublisher')
 
 
-def jclouds(parser, xml_parent, data):
+def jclouds(registry, xml_parent, data):
     """yaml: jclouds
     JClouds Cloud Storage Settings provides a way to store artifacts on
     JClouds supported storage providers. Requires the Jenkins
@@ -173,7 +160,7 @@ def jclouds(parser, xml_parent, data):
         data.get('hierarchy', False)).lower()
 
 
-def javadoc(parser, xml_parent, data):
+def javadoc(registry, xml_parent, data):
     """yaml: javadoc
     Publish Javadoc
     Requires the Jenkins :jenkins-wiki:`Javadoc Plugin <Javadoc+Plugin>`.
@@ -199,7 +186,7 @@ def javadoc(parser, xml_parent, data):
         'keep-all-successful', False)).lower()
 
 
-def jdepend(parser, xml_parent, data):
+def jdepend(registry, xml_parent, data):
     """yaml: jdepend
     Publish jdepend report
     Requires the :jenkins-wiki:`JDepend Plugin <JDepend+Plugin>`.
@@ -214,13 +201,11 @@ def jdepend(parser, xml_parent, data):
     jdepend = XML.SubElement(
         xml_parent,
         'hudson.plugins.jdepend.JDependRecorder')
-    filepath = data.get('file', None)
-    if filepath is None:
-        raise MissingAttributeError('file')
-    XML.SubElement(jdepend, 'configuredJDependFile').text = str(filepath)
+    mapping = [('file', 'configuredJDependFile', None)]
+    helpers.convert_mapping_to_xml(jdepend, data, mapping, fail_required=True)
 
 
-def hue_light(parser, xml_parent, data):
+def hue_light(registry, xml_parent, data):
     """yaml: hue-light
     This plugin shows the state of your builds using the awesome Philips hue
     lights.
@@ -235,38 +220,37 @@ def hue_light(parser, xml_parent, data):
     :arg string unstable-build: Colour of unstable state (default 'yellow')
     :arg string bad-build: Colour of unsuccessful state (default 'red')
 
-    Example:
+    Full Example:
 
-    .. literalinclude::
-       /../../tests/publishers/fixtures/hue-light-minimal.yaml
+    .. literalinclude:: /../../tests/publishers/fixtures/hue-light-full.yaml
        :language: yaml
 
-    .. literalinclude::
-       /../../tests/publishers/fixtures/hue-light001.yaml
+    Minimal Example:
+
+    .. literalinclude:: /../../tests/publishers/fixtures/hue-light-minimal.yaml
        :language: yaml
     """
 
     hue_light = XML.SubElement(
         xml_parent, 'org.jenkinsci.plugins.hue__light.LightNotifier')
     hue_light.set('plugin', 'hue-light')
-
-    if 'light-id' not in data:
-        raise MissingAttributeError('light-id')
     lightId = XML.SubElement(hue_light, 'lightId')
-    XML.SubElement(lightId, 'string').text = str(data.get(
-        'light-id', ''))
 
-    XML.SubElement(hue_light, 'preBuild').text = data.get(
-        'pre-build', 'blue')
-    XML.SubElement(hue_light, 'goodBuild').text = data.get(
-        'good-build', 'green')
-    XML.SubElement(hue_light, 'unstableBuild').text = data.get(
-        'unstable-build', 'yellow')
-    XML.SubElement(hue_light, 'badBuild').text = data.get(
-        'bad-build', 'red')
+    id_mapping = [('light-id', 'string', None)]
+    helpers.convert_mapping_to_xml(
+        lightId, data, id_mapping, fail_required=True)
+
+    build_mapping = [
+        ('pre-build', 'preBuild', 'blue'),
+        ('good-build', 'goodBuild', 'green'),
+        ('unstable-build', 'unstableBuild', 'yellow'),
+        ('bad-build', 'badBuild', 'red'),
+    ]
+    helpers.convert_mapping_to_xml(
+        hue_light, data, build_mapping, fail_required=True)
 
 
-def campfire(parser, xml_parent, data):
+def campfire(registry, xml_parent, data):
     """yaml: campfire
     Send build notifications to Campfire rooms.
     Requires the Jenkins :jenkins-wiki:`Campfire Plugin <Campfire+Plugin>`.
@@ -310,7 +294,56 @@ def campfire(parser, xml_parent, data):
         XML.SubElement(room, 'campfire reference="../../campfire"')
 
 
-def emotional_jenkins(parser, xml_parent, data):
+def codecover(registry, xml_parent, data):
+    """yaml: codecover
+    This plugin allows you to capture code coverage report from CodeCover.
+    Jenkins will generate the trend report of coverage.
+    Requires the Jenkins :jenkins-wiki:`CodeCover Plugin <CodeCover+Plugin>`.
+
+    :arg str include: Specify the path to the CodeCover HTML report file,
+        relative to the workspace root (default '')
+    :arg int min-statement: Minimum statement threshold (default 0)
+    :arg int max-statement: Maximum statement threshold (default 90)
+    :arg int min-branch: Minimum branch threshold (default 0)
+    :arg int max-branch: Maximum branch threshold (default 80)
+    :arg int min-loop: Minimum loop threshold (default 0)
+    :arg int max-loop: Maximum loop threshold (default 50)
+    :arg int min-condition: Minimum condition threshold (default 0)
+    :arg int max-condition: Maximum conditon threshold (default 50)
+
+    Minimal Example:
+
+    .. literalinclude:: /../../tests/publishers/fixtures/codecover-minimal.yaml
+       :language: yaml
+
+    Full Example:
+
+    .. literalinclude:: /../../tests/publishers/fixtures/codecover-full.yaml
+       :language: yaml
+    """
+
+    codecover = XML.SubElement(
+        xml_parent, 'hudson.plugins.codecover.CodeCoverPublisher')
+    codecover.set('plugin', 'codecover')
+
+    XML.SubElement(codecover, 'includes').text = str(data.get('include', ''))
+
+    health_report = XML.SubElement(codecover, 'healthReports')
+    mapping = [
+        ('min-statement', 'minStatement', 0),
+        ('max-statement', 'maxStatement', 90),
+        ('min-branch', 'minBranch', 0),
+        ('max-branch', 'maxBranch', 80),
+        ('min-loop', 'minLoop', 0),
+        ('max-loop', 'maxLoop', 50),
+        ('min-condition', 'minCondition', 0),
+        ('max-condition', 'maxCondition', 50),
+    ]
+    helpers.convert_mapping_to_xml(
+        health_report, data, mapping, fail_required=True)
+
+
+def emotional_jenkins(registry, xml_parent, data):
     """yaml: emotional-jenkins
     Emotional Jenkins. This funny plugin changes the expression of Mr. Jenkins
     in the background when your builds fail.
@@ -328,7 +361,7 @@ def emotional_jenkins(parser, xml_parent, data):
                    'EmotionalJenkinsPublisher')
 
 
-def trigger_parameterized_builds(parser, xml_parent, data):
+def trigger_parameterized_builds(registry, xml_parent, data):
     """yaml: trigger-parameterized-builds
     Trigger parameterized builds of other jobs.
     Requires the Jenkins :jenkins-wiki:`Parameterized Trigger Plugin
@@ -368,7 +401,7 @@ def trigger_parameterized_builds(parser, xml_parent, data):
         (optional)
     :arg str condition: when to trigger the other job. Can be: 'SUCCESS',
       'UNSTABLE', 'FAILED_OR_BETTER', 'UNSTABLE_OR_BETTER',
-      'UNSTABLE_OR_WORSE', 'FAILED', 'ALWAYS'. (default: 'ALWAYS')
+      'UNSTABLE_OR_WORSE', 'FAILED', 'ALWAYS'. (default 'ALWAYS')
     :arg str property-file: Use properties from file (optional)
     :arg bool fail-on-missing: Blocks the triggering of the downstream jobs
         if any of the property files are not found in the workspace.
@@ -421,14 +454,14 @@ def trigger_parameterized_builds(parser, xml_parent, data):
     ]
 
     try:
-        if parser.config.getboolean('__future__',
-                                    'param_order_from_yaml'):
+        if registry.jjb_config.config_parser.getboolean(
+                '__future__', 'param_order_from_yaml'):
             orig_order = None
     except six.moves.configparser.NoSectionError:
         pass
 
     if orig_order:
-        logger.warn(
+        logger.warning(
             "Using deprecated order for parameter sets in "
             "triggered-parameterized-builds. This will be changed in a future "
             "release to inherit the order from the user defined yaml. To "
@@ -457,7 +490,7 @@ def trigger_parameterized_builds(parser, xml_parent, data):
                 properties.text = param_value
             elif param_type == 'git-revision' and param_value:
                 if 'combine-queued-commits' in project_def:
-                    logger.warn(
+                    logger.warning(
                         "'combine-queued-commit' has moved to reside under "
                         "'git-revision' configuration, please update your "
                         "configs as support for this will be removed."
@@ -468,7 +501,7 @@ def trigger_parameterized_builds(parser, xml_parent, data):
                     }
                 else:
                     git_revision = project_def['git-revision']
-                append_git_revision_config(tconfigs, git_revision)
+                helpers.append_git_revision_config(tconfigs, git_revision)
             elif param_type == 'property-file':
                 params = XML.SubElement(tconfigs,
                                         pt_prefix + 'FileBuildParameters')
@@ -550,7 +583,7 @@ def trigger_parameterized_builds(parser, xml_parent, data):
             project_def.get('trigger-with-no-params', False)).lower()
 
 
-def trigger(parser, xml_parent, data):
+def trigger(registry, xml_parent, data):
     """yaml: trigger
     Trigger non-parametrised builds of other jobs.
 
@@ -581,21 +614,21 @@ def trigger(parser, xml_parent, data):
     tcolor.text = hudson_model.THRESHOLDS[threshold]['color']
 
 
-def clone_workspace(parser, xml_parent, data):
+def clone_workspace(registry, xml_parent, data):
     """yaml: clone-workspace
     Archive the workspace from builds of one project and reuse them as the SCM
     source for another project.
     Requires the Jenkins :jenkins-wiki:`Clone Workspace SCM Plugin
     <Clone+Workspace+SCM+Plugin>`.
 
-    :arg str workspace-glob: Files to include in cloned workspace
+    :arg str workspace-glob: Files to include in cloned workspace (default '')
     :arg str workspace-exclude-glob: Files to exclude from cloned workspace
     :arg str criteria: Criteria for build to be archived.  Can be 'any',
-        'not failed', or 'successful'. (default: any )
+        'not failed', or 'successful'. (default 'any')
     :arg str archive-method: Choose the method to use for archiving the
-        workspace.  Can be 'tar' or 'zip'.  (default: tar)
+        workspace.  Can be 'tar' or 'zip'.  (default 'tar')
     :arg bool override-default-excludes: Override default ant excludes.
-        (default: false)
+        (default false)
 
     Minimal example:
 
@@ -612,12 +645,15 @@ def clone_workspace(parser, xml_parent, data):
 
     cloneworkspace = XML.SubElement(
         xml_parent,
-        'hudson.plugins.cloneworkspace.CloneWorkspacePublisher',
-        {'plugin': 'clone-workspace-scm'})
+        'hudson.plugins.cloneworkspace.CloneWorkspacePublisher')
+    cloneworkspace.set('plugin', 'clone-workspace-scm')
 
-    XML.SubElement(
-        cloneworkspace,
-        'workspaceGlob').text = data.get('workspace-glob', None)
+    mappings = [
+        ('workspace-glob', 'workspaceGlob', ''),
+        ('override-default-excludes', 'overrideDefaultExcludes', False),
+    ]
+    helpers.convert_mapping_to_xml(
+        cloneworkspace, data, mappings, fail_required=True)
 
     if 'workspace-exclude-glob' in data:
         XML.SubElement(
@@ -646,14 +682,8 @@ def clone_workspace(parser, xml_parent, data):
     else:
         XML.SubElement(cloneworkspace, 'archiveMethod').text = archive_method
 
-    override_default_excludes_str = str(
-        data.get('override-default-excludes', False)).lower()
-    override_default_excludes_elem = XML.SubElement(
-        cloneworkspace, 'overrideDefaultExcludes')
-    override_default_excludes_elem.text = override_default_excludes_str
 
-
-def cloverphp(parser, xml_parent, data):
+def cloverphp(registry, xml_parent, data):
     """yaml: cloverphp
     Capture code coverage reports from PHPUnit
     Requires the Jenkins :jenkins-wiki:`Clover PHP Plugin <Clover+PHP+Plugin>`.
@@ -663,26 +693,26 @@ def cloverphp(parser, xml_parent, data):
     has to be filled in the `xml-location` field.
 
     :arg str xml-location: Path to the coverage XML file generated by PHPUnit
-      using --coverage-clover. Relative to workspace. (required)
+        using --coverage-clover. Relative to workspace. (required)
     :arg dict html: When existent, whether the plugin should generate a HTML
-      report.  Note that PHPUnit already provide a HTML report via its
-      --cover-html option which can be set in your builder (optional):
+        report.  Note that PHPUnit already provide a HTML report via its
+        --cover-html option which can be set in your builder (optional):
 
         * **dir** (str): Directory where HTML report will be generated relative
                          to workspace. (required in `html` dict).
-        * **archive** (bool): Whether to archive HTML reports (default True).
+        * **archive** (bool): Whether to archive HTML reports (default true).
 
     :arg list metric-targets: List of metric targets to reach, must be one of
-      **healthy**, **unhealthy** and **failing**. Each metric target can takes
-      two parameters:
+        **healthy**, **unhealthy** and **failing**. Each metric target can
+        takes two parameters:
 
         * **method**  Target for method coverage
         * **statement** Target for statements coverage
 
-      Whenever a metric target is not filled in, the Jenkins plugin can fill in
-      defaults for you (as of v0.3.3 of the plugin the healthy target will have
-      method: 70 and statement: 80 if both are left empty). Jenkins Job Builder
-      will mimic that feature to ensure clean configuration diff.
+        Whenever a metric target is not filled in, the Jenkins plugin can fill
+        in defaults for you (as of v0.3.3 of the plugin the healthy target will
+        have method: 70 and statement: 80 if both are left empty). Jenkins Job
+        Builder will mimic that feature to ensure clean configuration diff.
 
     Minimal example:
 
@@ -697,6 +727,7 @@ def cloverphp(parser, xml_parent, data):
     cloverphp = XML.SubElement(
         xml_parent,
         'org.jenkinsci.plugins.cloverphp.CloverPHPPublisher')
+    cloverphp.set('plugin', 'cloverphp')
 
     # The plugin requires clover XML file to parse
     if 'xml-location' not in data:
@@ -716,13 +747,13 @@ def cloverphp(parser, xml_parent, data):
             # No point in going further, the plugin would not work
             raise JenkinsJobsException('htmldir is required in a html block')
 
-    XML.SubElement(cloverphp, 'publishHtmlReport').text = \
-        str(html_publish).lower()
+    XML.SubElement(cloverphp, 'publishHtmlReport').text = str(
+        html_publish).lower()
     if html_publish:
         XML.SubElement(cloverphp, 'reportDir').text = html_dir
     XML.SubElement(cloverphp, 'xmlLocation').text = data.get('xml-location')
-    XML.SubElement(cloverphp, 'disableArchiving').text = \
-        str(not html_archive).lower()
+    XML.SubElement(cloverphp, 'disableArchiving').text = str(
+        not html_archive).lower()
 
     # Handle targets
 
@@ -759,7 +790,7 @@ def cloverphp(parser, xml_parent, data):
             XML.SubElement(cur_target, t_type + 'Coverage').text = str(val)
 
 
-def coverage(parser, xml_parent, data):
+def coverage(registry, xml_parent, data):
     """yaml: coverage
     WARNING: The coverage function is deprecated. Instead, use the
     cobertura function to generate a cobertura coverage report.
@@ -772,7 +803,7 @@ def coverage(parser, xml_parent, data):
        :language: yaml
     """
     logger = logging.getLogger(__name__)
-    logger.warn("Coverage function is deprecated. Switch to cobertura.")
+    logger.warning("Coverage function is deprecated. Switch to cobertura.")
 
     cobertura = XML.SubElement(xml_parent,
                                'hudson.plugins.cobertura.CoberturaPublisher')
@@ -829,27 +860,26 @@ def coverage(parser, xml_parent, data):
     XML.SubElement(cobertura, 'sourceEncoding').text = 'ASCII'
 
 
-def cobertura(parser, xml_parent, data):
+def cobertura(registry, xml_parent, data):
     """yaml: cobertura
     Generate a cobertura coverage report.
     Requires the Jenkins :jenkins-wiki:`Cobertura Coverage Plugin
     <Cobertura+Plugin>`.
 
     :arg str report-file: This is a file name pattern that can be used
-                          to locate the cobertura xml report files (optional)
+        to locate the cobertura xml report files (optional)
     :arg bool only-stable: Include only stable builds (default false)
     :arg bool fail-no-reports: fail builds if no coverage reports are found
-                               (default false)
-    :arg bool fail-unhealthy: Unhealthy projects will be failed
-                              (default false)
+        (default false)
+    :arg bool fail-unhealthy: Unhealthy projects will be failed (default false)
     :arg bool fail-unstable: Unstable projects will be failed (default false)
     :arg bool health-auto-update: Auto update threshold for health on
-                                  successful build (default false)
+        successful build (default false)
     :arg bool stability-auto-update: Auto update threshold for stability on
-                                     successful build (default false)
+        successful build (default false)
     :arg bool zoom-coverage-chart: Zoom the coverage chart and crop area below
-                                   the minimum and above the maximum coverage
-                                   of the past reports (default false)
+        the minimum and above the maximum coverage of the past reports
+        (default false)
     :arg str source-encoding: Override the source encoding (default ASCII)
     :arg dict targets:
 
@@ -866,22 +896,19 @@ def cobertura(parser, xml_parent, data):
     """
     cobertura = XML.SubElement(xml_parent,
                                'hudson.plugins.cobertura.CoberturaPublisher')
-    XML.SubElement(cobertura, 'coberturaReportFile').text = data.get(
-        'report-file', '**/coverage.xml')
-    XML.SubElement(cobertura, 'onlyStable').text = str(
-        data.get('only-stable', False)).lower()
-    XML.SubElement(cobertura, 'failUnhealthy').text = str(
-        data.get('fail-unhealthy', False)).lower()
-    XML.SubElement(cobertura, 'failUnstable').text = str(
-        data.get('fail-unstable', False)).lower()
-    XML.SubElement(cobertura, 'autoUpdateHealth').text = str(
-        data.get('health-auto-update', False)).lower()
-    XML.SubElement(cobertura, 'autoUpdateStability').text = str(
-        data.get('stability-auto-update', False)).lower()
-    XML.SubElement(cobertura, 'zoomCoverageChart').text = str(
-        data.get('zoom-coverage-chart', False)).lower()
-    XML.SubElement(cobertura, 'failNoReports').text = str(
-        data.get('fail-no-reports', False)).lower()
+    mapping = [
+        ('report-file', 'coberturaReportFile', '**/coverage.xml'),
+        ('only-stable', 'onlyStable', False),
+        ('fail-unhealthy', 'failUnhealthy', False),
+        ('fail-unstable', 'failUnstable', False),
+        ('health-auto-update', 'autoUpdateHealth', False),
+        ('stability-auto-update', 'autoUpdateStability', False),
+        ('zoom-coverage-chart', 'zoomCoverageChart', False),
+        ('fail-no-reports', 'failNoReports', False),
+    ]
+    helpers.convert_mapping_to_xml(
+        cobertura, data, mapping, fail_required=True)
+
     healthy = XML.SubElement(cobertura, 'healthyTarget')
     targets = XML.SubElement(healthy, 'targets', {
         'class': 'enum-map',
@@ -921,7 +948,7 @@ def cobertura(parser, xml_parent, data):
         'source-encoding', 'ASCII')
 
 
-def jacoco(parser, xml_parent, data):
+def jacoco(registry, xml_parent, data):
     """yaml: jacoco
     Generate a JaCoCo coverage report.
     Requires the Jenkins :jenkins-wiki:`JaCoCo Plugin <JaCoCo+Plugin>`.
@@ -934,7 +961,7 @@ def jacoco(parser, xml_parent, data):
     :arg str source-pattern: This is a file name pattern that can be used
                           to locate source files (default ``**/src/main/java``)
     :arg bool update-build-status: Update the build according to the results
-                          (default False)
+                          (default false)
     :arg str inclusion-pattern: This is a file name pattern that can be used
                           to include certain class files (optional)
     :arg str exclusion-pattern: This is a file name pattern that can be used
@@ -991,7 +1018,7 @@ def jacoco(parser, xml_parent, data):
                        'Coverage').text = str(item_values.get('unhealthy', 0))
 
 
-def ftp(parser, xml_parent, data):
+def ftp(registry, xml_parent, data):
     """yaml: ftp
     Upload files via FTP.
     Requires the Jenkins :jenkins-wiki:`Publish over FTP Plugin
@@ -1033,16 +1060,74 @@ def ftp(parser, xml_parent, data):
     XML.SubElement(transfer_node, 'asciiMode').text = 'false'
 
 
-def junit(parser, xml_parent, data):
+def ftp_publisher(registry, xml_parent, data):
+    """yaml: ftp-publisher
+    This plugin can be used to upload project artifacts and whole directories
+    to an ftp server.
+    Requires the Jenkins :jenkins-wiki:`FTP-Publisher Plugin
+    <FTP-Publisher+Plugin>`.
+
+    :arg list uploads: List of files to upload
+
+        :uploads:
+            * **file-path** ('str') -- Destination folder. It will be created
+                if doesn't exists. Created relative to ftp root directory.
+                (default '')
+            * **source-file** ('str') -- Source files which will be uploaded
+                (default '')
+    :arg str site-name: Name of FTP server to upload to (required)
+    :arg bool use-timestamps: Use timestamps in the FTP directory path (default
+        false)
+    :arg bool flatten-files: Flatten files on the FTP host (default false)
+    :arg bool skip-publishing: Skip publishing (default false)
+
+    Minimal Example:
+
+    .. literalinclude::
+       /../../tests/publishers/fixtures/ftp-publisher-minimal.yaml
+       :language: yaml
+
+    Full Example:
+
+    .. literalinclude::
+       /../../tests/publishers/fixtures/ftp-publisher-full.yaml
+       :language: yaml
+    """
+    ftp = XML.SubElement(xml_parent, 'com.zanox.hudson.plugins.FTPPublisher')
+    ftp.set('plugin', 'ftppublisher')
+
+    entries = XML.SubElement(ftp, 'entries')
+    if 'uploads' in data:
+        upload_mapping = [
+            ('file-path', 'filePath', ''),
+            ('source-file', 'sourceFile', ''),
+        ]
+        for upload in data['uploads']:
+            entry = XML.SubElement(entries, 'com.zanox.hudson.plugins.Entry')
+            helpers.convert_mapping_to_xml(
+                entry, upload, upload_mapping, fail_required=True)
+
+    mapping = [
+        ('site-name', 'siteName', None),
+        ('use-timestamps', 'useTimestamps', False),
+        ('flatten-files', 'flatten', False),
+        ('skip-publishing', 'skip', False),
+    ]
+    helpers.convert_mapping_to_xml(ftp, data, mapping, fail_required=True)
+
+
+def junit(registry, xml_parent, data):
     """yaml: junit
     Publish JUnit test results.
 
-    :arg str results: results filename
+    :arg str results: results filename (required)
     :arg bool keep-long-stdio: Retain long standard output/error in test
-      results (default true).
+        results (default true).
     :arg float health-scale-factor: Amplification factor to apply to test
-      failures when computing the test result contribution to the build health
-      score. (default 1.0)
+        failures when computing the test result contribution to the build
+        health score. (default 1.0)
+    :arg bool allow-empty-results: Do not fail the build on empty test results
+        (default false)
     :arg bool test-stability: Add historical information about test
         results stability (default false).
         Requires the Jenkins :jenkins-wiki:`Test stability Plugin
@@ -1052,6 +1137,9 @@ def junit(parser, xml_parent, data):
     :arg bool measurement-plots: Create measurement plots (default false)
         Requires the Jenkins :jenkins-wiki:`Measurement Plots Plugin
         <Measurement+Plots+Plugin>`.
+    :arg bool flaky-test-reports: Publish flaky test reports (default false).
+        Requires the Jenkins :jenkins-wiki:`Flaky Test Handler Plugin
+        <Flaky+Test+Handler+Plugin>`.
 
     Minimal example using defaults:
 
@@ -1065,11 +1153,16 @@ def junit(parser, xml_parent, data):
     """
     junitresult = XML.SubElement(xml_parent,
                                  'hudson.tasks.junit.JUnitResultArchiver')
-    XML.SubElement(junitresult, 'testResults').text = data['results']
-    XML.SubElement(junitresult, 'keepLongStdio').text = str(
-        data.get('keep-long-stdio', True)).lower()
-    XML.SubElement(junitresult, 'healthScaleFactor').text = str(
-        data.get('health-scale-factor', '1.0'))
+    junitresult.set('plugin', 'junit')
+    mapping = [
+        ('results', 'testResults', None),
+        ('keep-long-stdio', 'keepLongStdio', True),
+        ('health-scale-factor', 'healthScaleFactor', '1.0'),
+        ('allow-empty-results', 'allowEmptyResults', False),
+    ]
+    helpers.convert_mapping_to_xml(
+        junitresult, data, mapping, fail_required=True)
+
     datapublisher = XML.SubElement(junitresult, 'testDataPublishers')
     if str(data.get('test-stability', False)).lower() == 'true':
         XML.SubElement(datapublisher,
@@ -1081,9 +1174,13 @@ def junit(parser, xml_parent, data):
     if str(data.get('measurement-plots', False)).lower() == 'true':
         XML.SubElement(datapublisher,
                        'hudson.plugins.measurement__plots.TestDataPublisher')
+    if str(data.get('flaky-test-reports', False)).lower() == 'true':
+        XML.SubElement(datapublisher,
+                       'com.google.jenkins.flakyTestHandler.plugin'
+                       '.JUnitFlakyTestDataPublisher')
 
 
-def cucumber_reports(parser, xml_parent, data):
+def cucumber_reports(registry, xml_parent, data):
     """yaml: cucumber-reports
     This plugin creates pretty cucumber-jvm html reports on jenkins.
 
@@ -1091,93 +1188,98 @@ def cucumber_reports(parser, xml_parent, data):
     <Cucumber+Reports+Plugin>`.
 
     :arg str json-reports-path: The path relative to the workspace of
-      the json reports generated by cucumber-jvm e.g. target - leave
-      empty to scan the whole workspace (default '')
-    :arg str file-include-pattern: include pattern (default '')
-    :arg str file-exclude-pattern: exclude pattern (default '')
+        the json reports generated by cucumber-jvm e.g. target - leave
+        empty to scan the whole workspace (default '')
+    :arg str file-include-pattern: Include pattern (default '')
+    :arg str file-exclude-pattern: Exclude pattern (default '')
     :arg str plugin-url-path: The path to the jenkins user content url
-      e.g. :samp:`http://host:port[/jenkins/]plugin` - leave empty if jenkins
-      url root is host:port (default '')
-    :arg bool skipped-fails: skipped steps to cause the build to fail
-      (default false)
-    :arg bool pending-fails: pending steps to cause the build to fail
-      (default false)
-    :arg bool undefined-fails: undefined steps to cause the build to fail
-      (default false)
-    :arg bool missing-fails: missing steps to cause the build to fail
-      (default false)
-    :arg bool no-flash-charts: use javascript charts instead of flash charts
-      (default false)
-    :arg bool ignore-failed-tests: entire build to fail when these tests fail
-      (default false)
-    :arg bool parallel-testing: run same test in parallel for multiple devices
-      (default false)
+        e.g. :samp:`http://host:port[/jenkins/]plugin` - leave empty if jenkins
+        url root is host:port (default '')
+    :arg bool skipped-fails: Skipped steps to cause the build to fail
+        (default false)
+    :arg bool pending-fails: Pending steps to cause the build to fail
+        (default false)
+    :arg bool undefined-fails: Undefined steps to cause the build to fail
+        (default false)
+    :arg bool missing-fails: Missing steps to cause the build to fail
+        (default false)
+    :arg bool no-flash-charts: Use javascript charts instead of flash charts
+        (default false)
+    :arg bool ignore-failed-tests: Entire build to fail when these tests fail
+        (default false)
+    :arg bool parallel-testing: Run same test in parallel for multiple devices
+        (default false)
 
-    Example:
-
-    .. literalinclude::
-        /../../tests/publishers/fixtures/cucumber_reports001.yaml
-       :language: yaml
+    Full example:
 
     .. literalinclude::
-        /../../tests/publishers/fixtures/cucumber_reports002.yaml
+       /../../tests/publishers/fixtures/cucumber-reports-complete.yaml
        :language: yaml
 
+    Minimal Example:
+
+    .. literalinclude::
+       /../../tests/publishers/fixtures/cucumber-reports-minimal.yaml
+       :language: yaml
     """
     cucumber_reports = XML.SubElement(xml_parent,
                                       'net.masterthought.jenkins.'
                                       'CucumberReportPublisher')
+    cucumber_reports.set('plugin', 'cucumber-reports')
 
-    XML.SubElement(cucumber_reports, 'jsonReportDirectory').text = str(
-        data.get('json-reports-path', ''))
-    XML.SubElement(cucumber_reports, 'pluginUrlPath').text = str(
-        data.get('plugin-url-path', ''))
-    XML.SubElement(cucumber_reports, 'fileIncludePattern').text = str(
-        data.get('file-include-pattern', ''))
-    XML.SubElement(cucumber_reports, 'fileExcludePattern').text = str(
-        data.get('file-exclude-pattern', ''))
-    XML.SubElement(cucumber_reports, 'skippedFails').text = str(
-        data.get('skipped-fails', False)).lower()
-    XML.SubElement(cucumber_reports, 'pendingFails').text = str(
-        data.get('pending-fails', False)).lower()
-    XML.SubElement(cucumber_reports, 'undefinedFails').text = str(
-        data.get('undefined-fails', False)).lower()
-    XML.SubElement(cucumber_reports, 'missingFails').text = str(
-        data.get('missing-fails', False)).lower()
-    XML.SubElement(cucumber_reports, 'noFlashCharts').text = str(
-        data.get('no-flash-charts', False)).lower()
-    XML.SubElement(cucumber_reports, 'ignoreFailedTests').text = str(
-        data.get('ignore-failed-tests', False)).lower()
-    XML.SubElement(cucumber_reports, 'parallelTesting').text = str(
-        data.get('parallel-testing', False)).lower()
+    mappings = [
+        ('json-reports-path', 'jsonReportDirectory', ''),
+        ('plugin-url-path', 'pluginUrlPath', ''),
+        ('file-include-pattern', 'fileIncludePattern', ''),
+        ('file-exclude-pattern', 'fileExcludePattern', ''),
+        ('skipped-fails', 'skippedFails', False),
+        ('pending-fails', 'pendingFails', False),
+        ('undefined-fails', 'undefinedFails', False),
+        ('missing-fails', 'missingFails', False),
+        ('no-flash-charts', 'noFlashCharts', False),
+        ('ignore-failed-tests', 'ignoreFailedTests', False),
+        ('parallel-testing', 'parallelTesting', False)
+    ]
+    helpers.convert_mapping_to_xml(
+        cucumber_reports, data, mappings, fail_required=True)
 
 
-def cucumber_testresult(parser, xml_parent, data):
+def cucumber_testresult(registry, xml_parent, data):
     """yaml: cucumber-testresult
     Publish cucumber test results.
     Requires the Jenkins :jenkins-wiki:`cucumber testresult
     <Cucumber+Test+Result+Plugin>`.
 
-    :arg str results: results filename (required)
+    :arg str results: Results filename (required)
+    :arg bool ignore-bad-steps: Ignore not existed step results (default false)
 
-    Example:
+    Minimal example:
 
     .. literalinclude::
-        /../../tests/publishers/fixtures/cucumber_testresult.yaml
-        :language: yaml
+       /../../tests/publishers/fixtures/cucumber-testresult-minimal.yaml
+       :language: yaml
 
+    Full Example:
+
+    .. literalinclude::
+       /../../tests/publishers/fixtures/cucumber-testresult-complete.yaml
+       :language: yaml
     """
     cucumber_result = XML.SubElement(xml_parent,
                                      'org.jenkinsci.plugins.cucumber.'
                                      'jsontestsupport.'
                                      'CucumberTestResultArchiver')
-    filepath = data.get('results', None)
-    if filepath is None:
-        raise MissingAttributeError('results')
-    XML.SubElement(cucumber_result, 'testResults').text = str(filepath)
+    cucumber_result.set('plugin', 'cucumber-testresult-plugin')
+
+    mappings = [
+        ('results', 'testResults', None),
+        ('ignore-bad-steps', 'ignoreBadSteps', False)
+    ]
+    helpers.convert_mapping_to_xml(
+        cucumber_result, data, mappings, fail_required=True)
 
 
-def xunit(parser, xml_parent, data):
+def xunit(registry, xml_parent, data):
     """yaml: xunit
     Publish tests results. Requires the Jenkins :jenkins-wiki:`xUnit Plugin
     <xUnit+Plugin>`.
@@ -1205,12 +1307,12 @@ def xunit(parser, xml_parent, data):
         ``gtest``, ``junit``, ``mstest``, ``nunit``, ``phpunit``, ``tusar``,
         ``unittest``, and ``valgrind``.
 
-            The 'custom' type is not supported.
+        The 'custom' type is not supported.
 
         :type (`dict`): each type can be configured using the following:
 
             * **pattern** (`str`): An Ant pattern to look for Junit result
-              files, relative to the workspace root.
+              files, relative to the workspace root (default '')
             * **requireupdate** (`bool`): fail the build whenever fresh tests
               results have not been found (default true).
             * **deleteoutput** (`bool`): delete temporary JUnit files
@@ -1228,6 +1330,7 @@ def xunit(parser, xml_parent, data):
     """
     logger = logging.getLogger(__name__)
     xunit = XML.SubElement(xml_parent, 'xunit')
+    xunit.set('plugin', 'xunit')
 
     # Map our internal types to the XML element names used by Jenkins plugin
     types_to_plugin_types = {
@@ -1258,8 +1361,8 @@ def xunit(parser, xml_parent, data):
     for configured_type in data['types']:
         type_name = next(iter(configured_type.keys()))
         if type_name not in implemented_types:
-            logger.warn("Requested xUnit type '%s' is not yet supported",
-                        type_name)
+            logger.warning("Requested xUnit type '%s' is not yet supported",
+                           type_name)
         else:
             # Append for generation
             supported_types.append(configured_type)
@@ -1271,22 +1374,22 @@ def xunit(parser, xml_parent, data):
         xmlframework = XML.SubElement(xmltypes,
                                       types_to_plugin_types[framework_name])
 
-        XML.SubElement(xmlframework, 'pattern').text = (
-            supported_type[framework_name].get('pattern', ''))
-        XML.SubElement(xmlframework, 'failIfNotNew').text = str(
-            supported_type[framework_name].get('requireupdate', True)).lower()
-        XML.SubElement(xmlframework, 'deleteOutputFiles').text = str(
-            supported_type[framework_name].get('deleteoutput', True)).lower()
-        XML.SubElement(xmlframework, 'skipNoTestFiles').text = str(
-            supported_type[framework_name].get('skip-if-no-test-files',
-                                               False)).lower()
-        XML.SubElement(xmlframework, 'stopProcessingIfError').text = str(
-            supported_type[framework_name].get('stoponerror', True)).lower()
+        mappings = [
+            ('pattern', 'pattern', ''),
+            ('requireupdate', 'failIfNotNew', True),
+            ('deleteoutput', 'deleteOutputFiles', True),
+            ('skip-if-no-test-files', 'skipNoTestFiles', False),
+            ('stoponerror', 'stopProcessingIfError', True),
+        ]
+        helpers.convert_mapping_to_xml(xmlframework,
+                                       supported_type[framework_name],
+                                       mappings,
+                                       fail_required=True)
 
     xmlthresholds = XML.SubElement(xunit, 'thresholds')
     for t in data.get('thresholds', []):
         if not ('failed' in t or 'skipped' in t):
-            logger.warn(
+            logger.warning(
                 "Unrecognized threshold, should be 'failed' or 'skipped'")
             continue
         elname = ("org.jenkinsci.plugins.xunit.threshold.%sThreshold" %
@@ -1332,7 +1435,7 @@ def _violations_add_entry(xml_parent, name, data):
         XML.SubElement(tconfig, 'pattern')
 
 
-def violations(parser, xml_parent, data):
+def violations(registry, xml_parent, data):
     """yaml: violations
     Publish code style violations.
     Requires the Jenkins :jenkins-wiki:`Violations Plugin <Violations>`.
@@ -1393,7 +1496,7 @@ def violations(parser, xml_parent, data):
     XML.SubElement(config, 'encoding').text = 'default'
 
 
-def findbugs(parser, xml_parent, data):
+def findbugs(registry, xml_parent, data):
     """yaml: findbugs
     FindBugs reporting for builds
 
@@ -1401,31 +1504,29 @@ def findbugs(parser, xml_parent, data):
     <FindBugs+Plugin>`.
 
     :arg str pattern: specifies the generated raw FindBugs XML report files,
-                      such as \*\*/findbugs.xml or \*\*/findbugsXml.xml.
-                      (Optional)
-    :arg bool rank-priority: Use rank as priority (default: false)
+        such as \*\*/findbugs.xml or \*\*/findbugsXml.xml. (default '')
+    :arg bool rank-priority: Use rank as priority (default false)
     :arg str include-files: Comma separated list of files to include.
-                            (Optional)
+        (default '')
     :arg str exclude-files: Comma separated list of files to exclude.
-                            (Optional)
+        (default '')
     :arg bool can-run-on-failed: Weather or not to run plug-in on failed builds
-                                 (default: false)
+        (default false)
     :arg bool should-detect-modules: Determines if Ant or Maven modules should
-                                     be detected for all files that contain
-                                     warnings. (default: false)
-    :arg int healthy: Sunny threshold (optional)
-    :arg int unhealthy: Stormy threshold (optional)
+        be detected for all files that contain warnings. (default false)
+    :arg int healthy: Sunny threshold (default '')
+    :arg int unhealthy: Stormy threshold (default '')
     :arg str health-threshold: Threshold priority for health status
-      ('low', 'normal' or 'high', defaulted to 'low')
+        ('low', 'normal' or 'high', defaulted to 'low')
     :arg bool dont-compute-new: If set to false, computes new warnings based on
-                                the reference build (default true)
-    :arg bool use-delta-values: Use delta for new warnings. (Default: false)
+        the reference build (default true)
+    :arg bool use-delta-values: Use delta for new warnings. (default false)
     :arg bool use-previous-build-as-reference:  If set then the number of new
-      warnings will always be calculated based on the previous build. Otherwise
-      the reference build. (Default: false)
+        warnings will always be calculated based on the previous build.
+        Otherwise the reference build. (default false)
     :arg bool use-stable-build-as-reference: The number of new warnings will be
-      calculated based on the last stable build, allowing reverts of unstable
-      builds where the number of warnings was decreased. (default false)
+        calculated based on the last stable build, allowing reverts of unstable
+        builds where the number of warnings was decreased. (default false)
     :arg dict thresholds:
         :thresholds:
             * **unstable** (`dict`)
@@ -1450,21 +1551,21 @@ def findbugs(parser, xml_parent, data):
 
     Minimal Example:
 
-    .. literalinclude::  /../../tests/reporters/fixtures/findbugs-minimal.yaml
+    .. literalinclude:: /../../tests/publishers/fixtures/findbugs-minimal.yaml
 
     Full Example:
 
-    .. literalinclude::  /../../tests/publishers/fixtures/findbugs01.yaml
+    .. literalinclude:: /../../tests/publishers/fixtures/findbugs-full.yaml
     """
     findbugs = XML.SubElement(xml_parent,
                               'hudson.plugins.findbugs.FindBugsPublisher')
     findbugs.set('plugin', 'findbugs')
 
-    findbugs_settings(findbugs, data)
-    build_trends_publisher('[FINDBUGS] ', findbugs, data)
+    helpers.findbugs_settings(findbugs, data)
+    helpers.build_trends_publisher('[FINDBUGS] ', findbugs, data)
 
 
-def checkstyle(parser, xml_parent, data):
+def checkstyle(registry, xml_parent, data):
     """yaml: checkstyle
     Publish trend reports with Checkstyle.
     Requires the Jenkins :jenkins-wiki:`Checkstyle Plugin <Checkstyle+Plugin>`.
@@ -1472,17 +1573,17 @@ def checkstyle(parser, xml_parent, data):
     The checkstyle component accepts a dictionary with the
     following values:
 
-    :arg str pattern: Report filename pattern (optional)
+    :arg str pattern: Report filename pattern (default '')
     :arg bool can-run-on-failed: Also runs for failed builds, instead of just
-      stable or unstable builds (default false)
+        stable or unstable builds (default false)
     :arg bool should-detect-modules: Determines if Ant or Maven modules should
-      be detected for all files that contain warnings (default false)
-    :arg int healthy: Sunny threshold (optional)
-    :arg int unhealthy: Stormy threshold (optional)
+        be detected for all files that contain warnings (default false)
+    :arg int healthy: Sunny threshold (default '')
+    :arg int unhealthy: Stormy threshold (default '')
     :arg str health-threshold: Threshold priority for health status
-      ('low', 'normal' or 'high', defaulted to 'low')
+        ('low', 'normal' or 'high') (default 'low')
     :arg dict thresholds: Mark build as failed or unstable if the number of
-      errors exceeds a threshold. (optional)
+        errors exceeds a threshold. (optional)
 
         :thresholds:
             * **unstable** (`dict`)
@@ -1504,19 +1605,19 @@ def checkstyle(parser, xml_parent, data):
                          * **new-high** (`int`)
                          * **new-normal** (`int`)
                          * **new-low** (`int`)
-    :arg str default-encoding: Encoding for parsing or showing files (optional)
+    :arg str default-encoding: Encoding for parsing or showing files
+        (default '')
     :arg bool do-not-resolve-relative-paths: (default false)
     :arg bool dont-compute-new: If set to false, computes new warnings based on
-      the reference build (default true)
+        the reference build (default true)
     :arg bool use-previous-build-as-reference: determines whether to always
-        use the previous build as the reference build (Default false)
+        use the previous build as the reference build (default false)
     :arg bool use-stable-build-as-reference: The number of new warnings will be
-      calculated based on the last stable build, allowing reverts of unstable
-      builds where the number of warnings was decreased. (default false)
+        calculated based on the last stable build, allowing reverts of unstable
+        builds where the number of warnings was decreased. (default false)
     :arg bool use-delta-values: If set then the number of new warnings is
-      calculated by subtracting the total number of warnings of the current
-      build from the reference build.
-      (default false)
+        calculated by subtracting the total number of warnings of the current
+        build from the reference build. (default false)
 
     Example:
 
@@ -1537,9 +1638,10 @@ def checkstyle(parser, xml_parent, data):
                 data.setdefault(lookup[old_key], data[old_key])
                 del data[old_key]
 
-    xml_element = XML.SubElement(xml_parent,
-                                 'hudson.plugins.checkstyle.'
-                                 'CheckStylePublisher')
+    checkstyle = XML.SubElement(xml_parent,
+                                'hudson.plugins.checkstyle.'
+                                'CheckStylePublisher')
+    checkstyle.set('plugin', 'checkstyle')
 
     # Convert old style yaml to new style
     convert_settings({
@@ -1559,10 +1661,10 @@ def checkstyle(parser, xml_parent, data):
             'totalLow': 'total-low'
         }, threshold_data.get(threshold, {}))
 
-    build_trends_publisher('[CHECKSTYLE] ', xml_element, data)
+    helpers.build_trends_publisher('[CHECKSTYLE] ', checkstyle, data)
 
 
-def scp(parser, xml_parent, data):
+def scp(registry, xml_parent, data):
     """yaml: scp
     Upload files via SCP
     Requires the Jenkins :jenkins-wiki:`SCP Plugin <SCP+plugin>`.
@@ -1590,9 +1692,9 @@ def scp(parser, xml_parent, data):
 
         /home/jenkins/workspace/${JOB_NAME}
 
-    :arg str site: name of the scp site
-    :arg str target: destination directory
-    :arg str source: source path specifier
+    :arg str site: name of the scp site (required)
+    :arg str target: destination directory (required)
+    :arg str source: source path specifier (default '')
     :arg bool keep-hierarchy: keep the file hierarchy when uploading
       (default false)
     :arg bool copy-after-failure: copy files even if the job fails
@@ -1605,30 +1707,30 @@ def scp(parser, xml_parent, data):
     .. literalinclude:: /../../tests/publishers/fixtures/scp001.yaml
        :language: yaml
     """
-    site = data['site']
     scp = XML.SubElement(xml_parent,
                          'be.certipost.hudson.plugin.SCPRepositoryPublisher')
-    XML.SubElement(scp, 'siteName').text = site
+    scp.set('plugin', 'scp')
+
+    mappings = [
+        ('site', 'siteName', None),
+    ]
+    helpers.convert_mapping_to_xml(scp, data, mappings, fail_required=True)
+
     entries = XML.SubElement(scp, 'entries')
     for entry in data['files']:
         entry_e = XML.SubElement(entries, 'be.certipost.hudson.plugin.Entry')
-        XML.SubElement(entry_e, 'filePath').text = entry['target']
-        XML.SubElement(entry_e, 'sourceFile').text = entry.get('source', '')
-        if entry.get('keep-hierarchy', False):
-            XML.SubElement(entry_e, 'keepHierarchy').text = 'true'
-        else:
-            XML.SubElement(entry_e, 'keepHierarchy').text = 'false'
-        if entry.get('copy-console', False):
-            XML.SubElement(entry_e, 'copyConsoleLog').text = 'true'
-        else:
-            XML.SubElement(entry_e, 'copyConsoleLog').text = 'false'
-        if entry.get('copy-after-failure', False):
-            XML.SubElement(entry_e, 'copyAfterFailure').text = 'true'
-        else:
-            XML.SubElement(entry_e, 'copyAfterFailure').text = 'false'
+        mappings = [
+            ('target', 'filePath', None),
+            ('source', 'sourceFile', ''),
+            ('keep-hierarchy', 'keepHierarchy', False),
+            ('copy-console', 'copyConsoleLog', False),
+            ('copy-after-failure', 'copyAfterFailure', False),
+        ]
+        helpers.convert_mapping_to_xml(
+            entry_e, entry, mappings, fail_required=True)
 
 
-def ssh(parser, xml_parent, data):
+def ssh(registry, xml_parent, data):
     """yaml: ssh
     Upload files via SCP.
     Requires the Jenkins :jenkins-wiki:`Publish over SSH Plugin
@@ -1659,21 +1761,21 @@ def ssh(parser, xml_parent, data):
        :language: yaml
     """
     console_prefix = 'SSH: '
-    plugin_tag = 'jenkins.plugins.publish__over__ssh.BapSshPublisherPlugin'
-    publisher_tag = 'jenkins.plugins.publish__over__ssh.BapSshPublisher'
-    transfer_tag = 'jenkins.plugins.publish__over__ssh.BapSshTransfer'
-    plugin_reference_tag = 'jenkins.plugins.publish_over_ssh.'    \
-        'BapSshPublisherPlugin'
-    base_publish_over(xml_parent,
-                      data,
-                      console_prefix,
-                      plugin_tag,
-                      publisher_tag,
-                      transfer_tag,
-                      plugin_reference_tag)
+    tag_prefix = 'jenkins.plugins.publish'
+    publisher_tag = '%s__over__ssh.BapSshPublisher' % tag_prefix
+    transfer_tag = '%s__over__ssh.BapSshTransfer' % tag_prefix
+    reference_tag = '%s_over_ssh.BapSshPublisherPlugin' % tag_prefix
+
+    if xml_parent.tag == 'publishers':
+        plugin_tag = '%s__over__ssh.BapSshPublisherPlugin' % tag_prefix
+    else:
+        plugin_tag = '%s__over__ssh.BapSshBuilderPlugin' % tag_prefix
+
+    base_publish_over(xml_parent, data, console_prefix, plugin_tag,
+                      publisher_tag, transfer_tag, reference_tag)
 
 
-def pipeline(parser, xml_parent, data):
+def pipeline(registry, xml_parent, data):
     """yaml: pipeline
     Specify a downstream project in a pipeline.
     Requires the Jenkins :jenkins-wiki:`Build Pipeline Plugin
@@ -1684,10 +1786,21 @@ def pipeline(parser, xml_parent, data):
       job (optional)
     :arg bool current-parameters: Whether to include the parameters passed
       to the current build to the triggered job (optional)
+    :arg str property-file: Use properties from file (optional)
+    :arg bool fail-on-missing: Blocks the triggering of the downstream jobs
+        if any of the property files are not found in the workspace.
+        Only valid when 'property-file' is specified.
+        (default false)
+    :arg str file-encoding: Encoding of contents of the files. If not
+        specified, default encoding of the platform is used. Only valid when
+        'property-file' is specified. (optional)
 
     Example:
 
     .. literalinclude:: /../../tests/publishers/fixtures/pipeline002.yaml
+       :language: yaml
+
+    .. literalinclude:: /../../tests/publishers/fixtures/pipeline003.yaml
        :language: yaml
 
 
@@ -1719,10 +1832,23 @@ def pipeline(parser, xml_parent, data):
                            'hudson.plugins.parameterizedtrigger.'
                            'CurrentBuildParameters')
 
+        if 'property-file' in data and data['property-file']:
+            params = XML.SubElement(configs,
+                                    'hudson.plugins.parameterizedtrigger.'
+                                    'FileBuildParameters')
+            properties = XML.SubElement(params, 'propertiesFile')
+            properties.text = data['property-file']
+            failOnMissing = XML.SubElement(params, 'failTriggerOnMissing')
+            failOnMissing.text = str(
+                data.get('fail-on-missing', False)).lower()
+            if 'file-encoding' in data:
+                XML.SubElement(params, 'encoding'
+                               ).text = data['file-encoding']
+
         XML.SubElement(pippub, 'downstreamProjectNames').text = data['project']
 
 
-def email(parser, xml_parent, data):
+def email(registry, xml_parent, data):
     """yaml: email
     Email notifications on build failure.
     Requires the Jenkins :jenkins-wiki:`Mailer Plugin
@@ -1730,11 +1856,11 @@ def email(parser, xml_parent, data):
 
 
     :arg str recipients: Space separated list of recipient email addresses
-      (required)
+        (required)
     :arg bool notify-every-unstable-build: Send an email for every
-      unstable build (default true)
+        unstable build (default true)
     :arg bool send-to-individuals: Send an email to the individual
-      who broke the build (default false)
+        who broke the build (default false)
 
     Example:
 
@@ -1749,10 +1875,11 @@ def email(parser, xml_parent, data):
     # TODO: raise exception if this is applied to a maven job
     mailer = XML.SubElement(xml_parent,
                             'hudson.tasks.Mailer')
-    try:
-        XML.SubElement(mailer, 'recipients').text = data['recipients']
-    except KeyError as e:
-        raise MissingAttributeError(e)
+    mailer.set('plugin', 'mailer')
+    mapping = [
+        ('recipients', 'recipients', None)
+    ]
+    helpers.convert_mapping_to_xml(mailer, data, mapping, fail_required=True)
 
     # Note the logic reversal (included here to match the GUI
     if data.get('notify-every-unstable-build', True):
@@ -1763,7 +1890,7 @@ def email(parser, xml_parent, data):
         data.get('send-to-individuals', False)).lower()
 
 
-def claim_build(parser, xml_parent, data):
+def claim_build(registry, xml_parent, data):
     """yaml: claim-build
     Claim build failures
     Requires the Jenkins :jenkins-wiki:`Claim Plugin <Claim+plugin>`.
@@ -1777,7 +1904,7 @@ def claim_build(parser, xml_parent, data):
     XML.SubElement(xml_parent, 'hudson.plugins.claim.ClaimPublisher')
 
 
-def base_email_ext(parser, xml_parent, data, ttype):
+def base_email_ext(registry, xml_parent, data, ttype):
     trigger = XML.SubElement(xml_parent,
                              'hudson.plugins.emailext.plugins.trigger.'
                              + ttype)
@@ -1786,22 +1913,24 @@ def base_email_ext(parser, xml_parent, data, ttype):
     XML.SubElement(email, 'subject').text = '$PROJECT_DEFAULT_SUBJECT'
     XML.SubElement(email, 'body').text = '$PROJECT_DEFAULT_CONTENT'
     if 'send-to' in data:
-        XML.SubElement(email, 'sendToDevelopers').text = \
-            str('developers' in data['send-to']).lower()
-        XML.SubElement(email, 'sendToRequester').text = \
-            str('requester' in data['send-to']).lower()
-        XML.SubElement(email, 'includeCulprits').text = \
-            str('culprits' in data['send-to']).lower()
-        XML.SubElement(email, 'sendToRecipientList').text = \
-            str('recipients' in data['send-to']).lower()
+        XML.SubElement(email, 'sendToDevelopers').text = str(
+            'developers' in data['send-to']).lower()
+        XML.SubElement(email, 'sendToRequester').text = str(
+            'requester' in data['send-to']).lower()
+        XML.SubElement(email, 'includeCulprits').text = str(
+            'culprits' in data['send-to']).lower()
+        XML.SubElement(email, 'sendToRecipientList').text = str(
+            'recipients' in data['send-to']).lower()
     else:
         XML.SubElement(email, 'sendToRequester').text = 'false'
         XML.SubElement(email, 'sendToDevelopers').text = 'false'
         XML.SubElement(email, 'includeCulprits').text = 'false'
         XML.SubElement(email, 'sendToRecipientList').text = 'true'
+    if ttype == 'ScriptTrigger':
+        XML.SubElement(trigger, 'triggerScript').text = data['trigger-script']
 
 
-def email_ext(parser, xml_parent, data):
+def email_ext(registry, xml_parent, data):
     """yaml: email-ext
     Extend Jenkin's built in email notification
     Requires the Jenkins :jenkins-wiki:`Email-ext Plugin
@@ -1813,19 +1942,24 @@ def email_ext(parser, xml_parent, data):
         be printed to the build log saying that the publisher is disabled.
         (default false)
     :arg str recipients: Comma separated list of recipient email addresses
+        (default '$DEFAULT_RECIPIENTS')
     :arg str reply-to: Comma separated list of email addresses that should be
-        in the Reply-To header for this project (default $DEFAULT_REPLYTO)
+        in the Reply-To header for this project (default '$DEFAULT_REPLYTO')
     :arg str content-type: The content type of the emails sent. If not set, the
         Jenkins plugin uses the value set on the main configuration page.
         Possible values: 'html', 'text', 'both-html-text' or 'default'
         (default 'default')
     :arg str subject: Subject for the email, can include variables like
         ${BUILD_NUMBER} or even groovy or javascript code
+        (default '$DEFAULT_SUBJECT')
     :arg str body: Content for the body of the email, can include variables
         like ${BUILD_NUMBER}, but the real magic is using groovy or
         javascript to hook into the Jenkins API itself
+        (default '$DEFAULT_CONTENT')
     :arg bool attach-build-log: Include build log in the email (default false)
-    :arg str attachments: pattern of files to include as attachment (optional)
+    :arg bool compress-log: Compress build log in the email (default false)
+    :arg str attachments: pattern of files to include as attachment
+         (default '')
     :arg bool always: Send an email for every result (default false)
     :arg bool unstable: Send an email for an unstable result (default false)
     :arg bool first-failure: Send an email for just the first failure
@@ -1845,7 +1979,11 @@ def email_ext(parser, xml_parent, data):
     :arg bool still-unstable: Send an email if the build is still unstable
         (default false)
     :arg bool pre-build: Send an email before the build (default false)
+    :arg str trigger-script: A Groovy script used to determine if an email
+        should be sent.
     :arg str presend-script: A Groovy script executed prior sending the mail.
+        (default '')
+    :arg str postsend-script: A Goovy script executed after sending the email.
         (default '')
     :arg bool save-output: Save email content to workspace (default false)
     :arg str matrix-trigger: If using matrix projects, when to trigger
@@ -1876,33 +2014,35 @@ def email_ext(parser, xml_parent, data):
         XML.SubElement(emailext, 'recipientList').text = '$DEFAULT_RECIPIENTS'
     ctrigger = XML.SubElement(emailext, 'configuredTriggers')
     if data.get('always', False):
-        base_email_ext(parser, ctrigger, data, 'AlwaysTrigger')
+        base_email_ext(registry, ctrigger, data, 'AlwaysTrigger')
     if data.get('unstable', False):
-        base_email_ext(parser, ctrigger, data, 'UnstableTrigger')
+        base_email_ext(registry, ctrigger, data, 'UnstableTrigger')
     if data.get('first-failure', False):
-        base_email_ext(parser, ctrigger, data, 'FirstFailureTrigger')
+        base_email_ext(registry, ctrigger, data, 'FirstFailureTrigger')
     if data.get('not-built', False):
-        base_email_ext(parser, ctrigger, data, 'NotBuiltTrigger')
+        base_email_ext(registry, ctrigger, data, 'NotBuiltTrigger')
     if data.get('aborted', False):
-        base_email_ext(parser, ctrigger, data, 'AbortedTrigger')
+        base_email_ext(registry, ctrigger, data, 'AbortedTrigger')
     if data.get('regression', False):
-        base_email_ext(parser, ctrigger, data, 'RegressionTrigger')
+        base_email_ext(registry, ctrigger, data, 'RegressionTrigger')
     if data.get('failure', True):
-        base_email_ext(parser, ctrigger, data, 'FailureTrigger')
+        base_email_ext(registry, ctrigger, data, 'FailureTrigger')
     if data.get('second-failure', False):
-        base_email_ext(parser, ctrigger, data, 'SecondFailureTrigger')
+        base_email_ext(registry, ctrigger, data, 'SecondFailureTrigger')
     if data.get('improvement', False):
-        base_email_ext(parser, ctrigger, data, 'ImprovementTrigger')
+        base_email_ext(registry, ctrigger, data, 'ImprovementTrigger')
     if data.get('still-failing', False):
-        base_email_ext(parser, ctrigger, data, 'StillFailingTrigger')
+        base_email_ext(registry, ctrigger, data, 'StillFailingTrigger')
     if data.get('success', False):
-        base_email_ext(parser, ctrigger, data, 'SuccessTrigger')
+        base_email_ext(registry, ctrigger, data, 'SuccessTrigger')
     if data.get('fixed', False):
-        base_email_ext(parser, ctrigger, data, 'FixedTrigger')
+        base_email_ext(registry, ctrigger, data, 'FixedTrigger')
     if data.get('still-unstable', False):
-        base_email_ext(parser, ctrigger, data, 'StillUnstableTrigger')
+        base_email_ext(registry, ctrigger, data, 'StillUnstableTrigger')
     if data.get('pre-build', False):
-        base_email_ext(parser, ctrigger, data, 'PreBuildTrigger')
+        base_email_ext(registry, ctrigger, data, 'PreBuildTrigger')
+    if data.get('trigger-script', False):
+        base_email_ext(registry, ctrigger, data, 'ScriptTrigger')
 
     content_type_mime = {
         'text': 'text/plain',
@@ -1916,22 +2056,21 @@ def email_ext(parser, xml_parent, data):
                                    % ', '.join(content_type_mime.keys()))
     XML.SubElement(emailext, 'contentType').text = content_type_mime[ctype]
 
-    XML.SubElement(emailext, 'defaultSubject').text = data.get(
-        'subject', '$DEFAULT_SUBJECT')
-    XML.SubElement(emailext, 'defaultContent').text = data.get(
-        'body', '$DEFAULT_CONTENT')
-    XML.SubElement(emailext, 'attachmentsPattern').text = data.get(
-        'attachments', '')
-    XML.SubElement(emailext, 'presendScript').text = data.get(
-        'presend-script', '')
-    XML.SubElement(emailext, 'attachBuildLog').text = str(data.get(
-        'attach-build-log', False)).lower()
-    XML.SubElement(emailext, 'saveOutput').text = str(data.get(
-        'save-output', False)).lower()
-    XML.SubElement(emailext, 'disabled').text = str(data.get(
-        'disable-publisher', False)).lower()
-    XML.SubElement(emailext, 'replyTo').text = data.get('reply-to',
-                                                        '$DEFAULT_REPLYTO')
+    mappings = [
+        ('subject', 'defaultSubject', '$DEFAULT_SUBJECT'),
+        ('body', 'defaultContent', '$DEFAULT_CONTENT'),
+        ('attachments', 'attachmentsPattern', ''),
+        ('presend-script', 'presendScript', ''),
+        ('postsend-script', 'postsendScript', ''),
+        ('attach-build-log', 'attachBuildLog', False),
+        ('compress-log', 'compressBuildLog', False),
+        ('save-output', 'saveOutput', False),
+        ('disable-publisher', 'disabled', False),
+        ('reply-to', 'replyTo', '$DEFAULT_REPLYTO'),
+    ]
+    helpers.convert_mapping_to_xml(
+        emailext, data, mappings, fail_required=True)
+
     matrix_dict = {'both': 'BOTH',
                    'only-configurations': 'ONLY_CONFIGURATIONS',
                    'only-parent': 'ONLY_PARENT'}
@@ -1942,16 +2081,17 @@ def email_ext(parser, xml_parent, data):
             raise JenkinsJobsException("matrix-trigger entered is not valid, "
                                        "must be one of: %s" %
                                        ", ".join(matrix_dict.keys()))
-        XML.SubElement(emailext, 'matrixTriggerMode').text = \
-            matrix_dict.get(matrix_trigger)
+        XML.SubElement(emailext, 'matrixTriggerMode').text = matrix_dict.get(
+            matrix_trigger)
 
 
-def fingerprint(parser, xml_parent, data):
+def fingerprint(registry, xml_parent, data):
     """yaml: fingerprint
-    Fingerprint files to track them across builds
+    Fingerprint files to track them across builds. Requires the
+    Jenkins :jenkins-wiki:`Fingerprint Plugin <Fingerprint+Plugin>`.
 
     :arg str files: files to fingerprint, follows the @includes of Ant fileset
-        (default blank)
+        (default '')
     :arg bool record-artifacts: fingerprint all archived artifacts
         (default false)
 
@@ -1961,12 +2101,14 @@ def fingerprint(parser, xml_parent, data):
        :language: yaml
     """
     finger = XML.SubElement(xml_parent, 'hudson.tasks.Fingerprinter')
-    XML.SubElement(finger, 'targets').text = data.get('files', '')
-    XML.SubElement(finger, 'recordBuildArtifacts').text = str(data.get(
-        'record-artifacts', False)).lower()
+    mappings = [
+        ('files', 'targets', ''),
+        ('record-artifacts', 'recordBuildArtifacts', False)
+    ]
+    helpers.convert_mapping_to_xml(finger, data, mappings, fail_required=True)
 
 
-def aggregate_tests(parser, xml_parent, data):
+def aggregate_tests(registry, xml_parent, data):
     """yaml: aggregate-tests
     Aggregate downstream test results
 
@@ -1984,7 +2126,7 @@ def aggregate_tests(parser, xml_parent, data):
         'include-failed-builds', False)).lower()
 
 
-def aggregate_flow_tests(parser, xml_parent, data):
+def aggregate_flow_tests(registry, xml_parent, data):
     """yaml: aggregate-flow-tests
     Aggregate downstream test results in a Build Flow job.
     Requires the Jenkins :jenkins-wiki:`Build Flow Test Aggregator Plugin
@@ -2006,79 +2148,137 @@ def aggregate_flow_tests(parser, xml_parent, data):
         data.get('show-test-results-trend', True)).lower()
 
 
-def cppcheck(parser, xml_parent, data):
+def cppcheck(registry, xml_parent, data):
     """yaml: cppcheck
     Cppcheck result publisher
     Requires the Jenkins :jenkins-wiki:`Cppcheck Plugin <Cppcheck+Plugin>`.
 
-    :arg str pattern: file pattern for cppcheck xml report
+    :arg str pattern: File pattern for cppcheck xml report (required)
+    :arg bool ignoreblankfiles: Ignore blank files (default false)
+    :arg bool allow-no-report: Do not fail the build if the Cppcheck report
+        is not found (default false)
+    :arg dict thresholds:
+        :thresholds: Configure the build status and health. A build is
+            considered as unstable or failure if the new or total number
+            of issues exceeds the specified thresholds. The build health
+            is also determined by thresholds. If the actual number of issues
+            is between the provided thresholds, then the build health is
+            interpolated.
+        * **unstable** (`str`): Total number unstable threshold (default '')
+        * **new-unstable** (`str`): New number unstable threshold (default '')
+        * **failure** (`str`): Total number failure threshold (default '')
+        * **new-failure** (`str`): New number failure threshold (default '')
+        * **healthy** (`str`): Healthy threshold (default '')
+        * **unhealthy** (`str`): Unhealthy threshold (default '')
+    :arg dict severity:
+        :severity: Determines which severity of issues should be considered
+            when evaluating the build status and health, default all true
+        * **error** (`bool`): Severity error (default true)
+        * **warning** (`bool`): Severity warning (default true)
+        * **style** (`bool`): Severity style (default true)
+        * **performance** (`bool`): Severity performance (default true)
+        * **information** (`bool`): Severity information (default true)
+        * **nocategory** (`bool`): Severity nocategory (default true)
+        * **portability** (`bool`): Severity portability (default true)
+    :arg dict graph:
+        :graph: Graph configuration
+        * **xysize** (`array`): Chart width and height (default [500, 200])
+        * **num-builds-in-graph** (`int`): Builds number in graph (default 0)
+    :arg dict display
+        :display: which errors to display, default only sum
+        * **sum** (`bool`): Display sum of all issues (default true)
+        * **error** (`bool`): Display errors (default false)
+        * **warning** (`bool`): Display warnings (default false)
+        * **style** (`bool`): Display style (default false)
+        * **performance** (`bool`): Display performance (default false)
+        * **information** (`bool`): Display information (default false)
+        * **nocategory** (`bool`): Display no category (default false)
+        * **portability** (`bool`): Display portability (default false)
 
-    for more optional parameters see the example
+    Minimal Example:
 
-    Example:
+    .. literalinclude::
+        /../../tests/publishers/fixtures/cppcheck-minimal.yaml
+       :language: yaml
 
-    .. literalinclude::  /../../tests/publishers/fixtures/cppcheck001.yaml
+    Full Example:
+    .. literalinclude::
+        /../../tests/publishers/fixtures/cppcheck-complete.yaml
        :language: yaml
     """
+
     cppextbase = XML.SubElement(xml_parent,
                                 'org.jenkinsci.plugins.cppcheck.'
                                 'CppcheckPublisher')
+    cppextbase.set('plugin', 'cppcheck')
     cppext = XML.SubElement(cppextbase, 'cppcheckConfig')
-    XML.SubElement(cppext, 'pattern').text = data['pattern']
-    XML.SubElement(cppext, 'ignoreBlankFiles').text = \
-        str(data.get('ignoreblankfiles', False)).lower()
+    mappings = [
+        ('pattern', 'pattern', None),
+        ('ignoreblankfiles', 'ignoreBlankFiles', False),
+        ('allow-no-report', 'allowNoReport', False)
+    ]
+    helpers.convert_mapping_to_xml(cppext, data, mappings, fail_required=True)
 
     csev = XML.SubElement(cppext, 'configSeverityEvaluation')
     thrsh = data.get('thresholds', {})
-    XML.SubElement(csev, 'threshold').text = str(thrsh.get('unstable', ''))
-    XML.SubElement(csev, 'newThreshold').text = \
-        str(thrsh.get('new-unstable', ''))
-    XML.SubElement(csev, 'failureThreshold').text = \
-        str(thrsh.get('failure', ''))
-    XML.SubElement(csev, 'newFailureThreshold').text = \
-        str(thrsh.get('new-failure', ''))
-    XML.SubElement(csev, 'healthy').text = str(thrsh.get('healthy', ''))
-    XML.SubElement(csev, 'unHealthy').text = str(thrsh.get('unhealthy', ''))
+    thrsh_mappings = [
+        ('unstable', 'threshold', ''),
+        ('new-unstable', 'newThreshold', ''),
+        ('failure', 'failureThreshold', ''),
+        ('new-failure', 'newFailureThreshold', ''),
+        ('healthy', 'healthy', ''),
+        ('unhealthy', 'unHealthy', '')
+    ]
+    helpers.convert_mapping_to_xml(
+        csev, thrsh, thrsh_mappings, fail_required=True)
 
     sev = thrsh.get('severity', {})
-    XML.SubElement(csev, 'severityError').text = \
-        str(sev.get('error', True)).lower()
-    XML.SubElement(csev, 'severityWarning').text = \
-        str(sev.get('warning', True)).lower()
-    XML.SubElement(csev, 'severityStyle').text = \
-        str(sev.get('style', True)).lower()
-    XML.SubElement(csev, 'severityPerformance').text = \
-        str(sev.get('performance', True)).lower()
-    XML.SubElement(csev, 'severityInformation').text = \
-        str(sev.get('information', True)).lower()
+    sev_mappings = [
+        ('error', 'severityError', True),
+        ('warning', 'severityWarning', True),
+        ('style', 'severityStyle', True),
+        ('performance', 'severityPerformance', True),
+        ('information', 'severityInformation', True),
+        ('nocategory', 'severityNoCategory', True),
+        ('portability', 'severityPortability', True)
+    ]
+    helpers.convert_mapping_to_xml(
+        csev, sev, sev_mappings, fail_required=True)
 
     graph = data.get('graph', {})
     cgraph = XML.SubElement(cppext, 'configGraph')
     x, y = graph.get('xysize', [500, 200])
     XML.SubElement(cgraph, 'xSize').text = str(x)
     XML.SubElement(cgraph, 'ySize').text = str(y)
+    graph_mapping = [
+        ('num-builds-in-graph', 'numBuildsInGraph', 0)
+    ]
+    helpers.convert_mapping_to_xml(
+        cgraph, graph, graph_mapping, fail_required=True)
+
     gdisplay = graph.get('display', {})
-    XML.SubElement(cgraph, 'displayAllErrors').text = \
-        str(gdisplay.get('sum', True)).lower()
-    XML.SubElement(cgraph, 'displayErrorSeverity').text = \
-        str(gdisplay.get('error', False)).lower()
-    XML.SubElement(cgraph, 'displayWarningSeverity').text = \
-        str(gdisplay.get('warning', False)).lower()
-    XML.SubElement(cgraph, 'displayStyleSeverity').text = \
-        str(gdisplay.get('style', False)).lower()
-    XML.SubElement(cgraph, 'displayPerformanceSeverity').text = \
-        str(gdisplay.get('performance', False)).lower()
-    XML.SubElement(cgraph, 'displayInformationSeverity').text = \
-        str(gdisplay.get('information', False)).lower()
+    gdisplay_mappings = [
+        ('sum', 'displayAllErrors', True),
+        ('error', 'displayErrorSeverity', False),
+        ('warning', 'displayWarningSeverity', False),
+        ('style', 'displayStyleSeverity', False),
+        ('performance', 'displayPerformanceSeverity', False),
+        ('information', 'displayInformationSeverity', False),
+        ('nocategory', 'displayNoCategorySeverity', False),
+        ('portability', 'displayPortabilitySeverity', False)
+    ]
+    helpers.convert_mapping_to_xml(
+        cgraph, gdisplay, gdisplay_mappings, fail_required=True)
 
 
-def logparser(parser, xml_parent, data):
+def logparser(registry, xml_parent, data):
     """yaml: logparser
     Requires the Jenkins :jenkins-wiki:`Log Parser Plugin <Log+Parser+Plugin>`.
 
-    :arg str parse-rules: full path to parse rules
+    :arg str parse-rules: full path to parse rules (default '')
     :arg bool unstable-on-warning: mark build unstable on warning
-    :arg bool fail-on-error: mark build failed on error
+        (default false)
+    :arg bool fail-on-error: mark build failed on error (default false)
 
     Example:
 
@@ -2088,15 +2288,16 @@ def logparser(parser, xml_parent, data):
 
     clog = XML.SubElement(xml_parent,
                           'hudson.plugins.logparser.LogParserPublisher')
-    XML.SubElement(clog, 'unstableOnWarning').text = \
-        str(data.get('unstable-on-warning', False)).lower()
-    XML.SubElement(clog, 'failBuildOnError').text = \
-        str(data.get('fail-on-error', False)).lower()
-    # v1.08: this must be the full path, the name of the rules is not enough
-    XML.SubElement(clog, 'parsingRulesPath').text = data.get('parse-rules', '')
+    clog.set('plugin', 'log-parser')
+    mappings = [
+        ('unstable-on-warning', 'unstableOnWarning', False),
+        ('fail-on-error', 'failBuildOnError', False),
+        ('parse-rules', 'parsingRulesPath', '')
+    ]
+    helpers.convert_mapping_to_xml(clog, data, mappings, fail_required=True)
 
 
-def copy_to_master(parser, xml_parent, data):
+def copy_to_master(registry, xml_parent, data):
     """yaml: copy-to-master
     Copy files to master from slave
     Requires the Jenkins :jenkins-wiki:`Copy To Slave Plugin
@@ -2105,8 +2306,10 @@ def copy_to_master(parser, xml_parent, data):
     :arg list includes: list of file patterns to copy
     :arg list excludes: list of file patterns to exclude
     :arg string destination: absolute path into which the files will be copied.
-                             If left blank they will be copied into the
-                             workspace of the current job
+        If left blank they will be copied into the workspace of the current job
+        (default '')
+    :arg bool run-after-result: If this is checked then copying files back to
+        master will not run until the build result is finalized.(default true)
 
     Example:
 
@@ -2114,20 +2317,23 @@ def copy_to_master(parser, xml_parent, data):
         /../../tests/publishers/fixtures/copy-to-master001.yaml
        :language: yaml
     """
-    p = 'com.michelin.cio.hudson.plugins.copytoslave.CopyToMasterNotifier'
-    cm = XML.SubElement(xml_parent, p)
+    cm = XML.SubElement(xml_parent, 'com.michelin.'
+                        'cio.hudson.plugins.copytoslave.CopyToMasterNotifier')
+    cm.set('plugin', 'copy-to-slave')
 
     XML.SubElement(cm, 'includes').text = ','.join(data.get('includes', ['']))
     XML.SubElement(cm, 'excludes').text = ','.join(data.get('excludes', ['']))
-
-    XML.SubElement(cm, 'destinationFolder').text = \
-        data.get('destination', '')
+    mappings = [
+        ('run-after-result', 'runAfterResultFinalised', True),
+        ('destination', 'destinationFolder', '')
+    ]
+    helpers.convert_mapping_to_xml(cm, data, mappings, fail_required=True)
 
     if data.get('destination', ''):
         XML.SubElement(cm, 'overrideDestinationFolder').text = 'true'
 
 
-def jira(parser, xml_parent, data):
+def jira(registry, xml_parent, data):
     """yaml: jira
     Update relevant JIRA issues
     Requires the Jenkins :jenkins-wiki:`JIRA Plugin <JIRA+Plugin>`.
@@ -2140,7 +2346,36 @@ def jira(parser, xml_parent, data):
     XML.SubElement(xml_parent, 'hudson.plugins.jira.JiraIssueUpdater')
 
 
-def groovy_postbuild(parser, xml_parent, data):
+def growl(registry, xml_parent, data):
+    """yaml: growl
+    Push notifications to growl client.
+    Requires the Jenkins :jenkins-wiki:`Growl Plugin <Growl+Plugin>`.
+
+    :arg str ip: IP address to send growl notifications to (required)
+    :arg bool notify-only-on-fail-or-recovery: send a growl only when build
+        fails or recovers from a failure (default false)
+
+    Minimal Example:
+
+    .. literalinclude:: /../../tests/publishers/fixtures/growl-minimal.yaml
+       :language: yaml
+
+    Full Example:
+
+    .. literalinclude:: /../../tests/publishers/fixtures/growl-full.yaml
+       :language: yaml
+    """
+    growl = XML.SubElement(xml_parent, 'hudson.plugins.growl.GrowlPublisher')
+    growl.set('plugin', 'growl')
+
+    mapping = [
+        ('ip', 'IP', None),
+        ('notify-only-on-fail-or-recovery', 'onlyOnFailureOrRecovery', False),
+    ]
+    helpers.convert_mapping_to_xml(growl, data, mapping, fail_required=True)
+
+
+def groovy_postbuild(registry, xml_parent, data):
     """yaml: groovy-postbuild
     Execute a groovy script.
     Requires the Jenkins :jenkins-wiki:`Groovy Postbuild Plugin
@@ -2154,13 +2389,13 @@ def groovy_postbuild(parser, xml_parent, data):
     :arg str script: The groovy script to execute
     :arg list classpath: List of additional classpaths (>=1.6)
     :arg str on-failure: In case of script failure leave build as it is
-                         for "nothing" option, mark build as unstable
-                         for "unstable" and mark job as failure for "failed"
-                         (default is "nothing")
+        for "nothing" option, mark build as unstable
+        for "unstable" and mark job as failure for "failed"
+        (default 'nothing')
     :arg bool matrix-parent: Run script for matrix parent only (>=1.9)
-                             (default false)
+        (default false)
     :arg bool sandbox: Execute script inside of groovy sandbox (>=2.0)
-                       (default false)
+        (default false)
 
     Example:
 
@@ -2171,8 +2406,8 @@ def groovy_postbuild(parser, xml_parent, data):
     logger = logging.getLogger("%s:groovy-postbuild" % __name__)
     # Backward compatibility with old format
     if isinstance(data, six.string_types):
-        logger.warn(
-            "You use deprecated configuration, please follow documentation "
+        logger.warning(
+            "You use depricated configuration, please follow documentation "
             "to change configuration. It is not going to be supported in "
             "future releases!"
         )
@@ -2180,7 +2415,7 @@ def groovy_postbuild(parser, xml_parent, data):
             'script': data,
         }
     # There are incompatible changes, we need to know version
-    info = parser.registry.get_plugin_info('groovy-postbuild')
+    info = registry.get_plugin_info('groovy-postbuild')
     version = pkg_resources.parse_version(info.get('version', "0"))
     # Version specific predicates
     matrix_parent_support = version >= pkg_resources.parse_version("1.9")
@@ -2233,66 +2468,74 @@ def base_publish_over(xml_parent, data, console_prefix,
                       plugin_tag, publisher_tag,
                       transferset_tag, reference_plugin_tag):
     outer = XML.SubElement(xml_parent, plugin_tag)
+    # 'Publish over SSH' builder has an extra top delegate element
+    if xml_parent.tag == 'builders':
+        outer = XML.SubElement(outer, 'delegate')
+
     XML.SubElement(outer, 'consolePrefix').text = console_prefix
     delegate = XML.SubElement(outer, 'delegate')
     publishers = XML.SubElement(delegate, 'publishers')
+
     inner = XML.SubElement(publishers, publisher_tag)
     XML.SubElement(inner, 'configName').text = data['site']
     XML.SubElement(inner, 'verbose').text = 'true'
 
     transfers = XML.SubElement(inner, 'transfers')
     transfersset = XML.SubElement(transfers, transferset_tag)
+
     XML.SubElement(transfersset, 'remoteDirectory').text = data['target']
     XML.SubElement(transfersset, 'sourceFiles').text = data['source']
+    XML.SubElement(transfersset, 'excludes').text = data.get('excludes', '')
+    XML.SubElement(transfersset, 'removePrefix').text = data.get(
+        'remove-prefix', '')
+    XML.SubElement(transfersset, 'remoteDirectorySDF').text = str(
+        data.get('target-is-date-format', False)).lower()
+    XML.SubElement(transfersset, 'flatten').text = str(
+        data.get('flatten', False)).lower()
+    XML.SubElement(transfersset, 'cleanRemote').text = str(
+        data.get('clean-remote', False)).lower()
+
     if 'command' in data:
         XML.SubElement(transfersset, 'execCommand').text = data['command']
     if 'timeout' in data:
         XML.SubElement(transfersset, 'execTimeout').text = str(data['timeout'])
     if 'use-pty' in data:
-        XML.SubElement(transfersset, 'usePty').text = \
-            str(data.get('use-pty', False)).lower()
-    XML.SubElement(transfersset, 'excludes').text = data.get('excludes', '')
-    XML.SubElement(transfersset, 'removePrefix').text = \
-        data.get('remove-prefix', '')
-    XML.SubElement(transfersset, 'remoteDirectorySDF').text = \
-        str(data.get('target-is-date-format', False)).lower()
-    XML.SubElement(transfersset, 'flatten').text = \
-        str(data.get('flatten', False)).lower()
-    XML.SubElement(transfersset, 'cleanRemote').text = \
-        str(data.get('clean-remote', False)).lower()
+        XML.SubElement(transfersset, 'usePty').text = str(
+            data.get('use-pty', False)).lower()
 
     XML.SubElement(inner, 'useWorkspaceInPromotion').text = 'false'
     XML.SubElement(inner, 'usePromotionTimestamp').text = 'false'
+
     XML.SubElement(delegate, 'continueOnError').text = 'false'
-    XML.SubElement(delegate, 'failOnError').text = \
-        str(data.get('fail-on-error', False)).lower()
-    XML.SubElement(delegate, 'alwaysPublishFromMaster').text = \
-        str(data.get('always-publish-from-master', False)).lower()
+    XML.SubElement(delegate, 'failOnError').text = str(
+        data.get('fail-on-error', False)).lower()
+    XML.SubElement(delegate, 'alwaysPublishFromMaster').text = str(
+        data.get('always-publish-from-master', False)).lower()
     XML.SubElement(delegate, 'hostConfigurationAccess',
-                   {'class': reference_plugin_tag,
-                    'reference': '../..'})
+                   {'class': reference_plugin_tag, 'reference': '../..'})
+
     return (outer, transfersset)
 
 
-def cifs(parser, xml_parent, data):
+def cifs(registry, xml_parent, data):
     """yaml: cifs
     Upload files via CIFS.
     Requires the Jenkins :jenkins-wiki:`Publish over CIFS Plugin
     <Publish+Over+CIFS+Plugin>`.
 
-    :arg str site: name of the cifs site/share
-    :arg str target: destination directory
+    :arg str site: name of the cifs site/share (required)
+    :arg str target: destination directory (required)
     :arg bool target-is-date-format: whether target is a date format. If true,
-      raw text should be quoted (default false)
+        raw text should be quoted (default false)
     :arg bool clean-remote: should the remote directory be deleted before
-      transferring files (default false)
-    :arg str source: source path specifier
-    :arg str excludes: excluded file pattern (optional)
+        transferring files (default false)
+    :arg str source: source path specifier (required)
+    :arg str excludes: excluded file pattern (default '')
     :arg str remove-prefix: prefix to remove from uploaded file paths
-      (optional)
+        (default '')
     :arg bool fail-on-error: fail the build if an error occurs (default false).
     :arg bool flatten: only create files on the server, don't create
-      directories (default false).
+        directories (default false).
 
     Example:
 
@@ -2304,8 +2547,8 @@ def cifs(parser, xml_parent, data):
     plugin_tag = 'jenkins.plugins.publish__over__cifs.CifsPublisherPlugin'
     publisher_tag = 'jenkins.plugins.publish__over__cifs.CifsPublisher'
     transfer_tag = 'jenkins.plugins.publish__over__cifs.CifsTransfer'
-    plugin_reference_tag = 'jenkins.plugins.publish_over_cifs.'    \
-        'CifsPublisherPlugin'
+    plugin_reference_tag = ('jenkins.plugins.publish_over_cifs.'
+                            'CifsPublisherPlugin')
     base_publish_over(xml_parent,
                       data,
                       console_prefix,
@@ -2315,7 +2558,7 @@ def cifs(parser, xml_parent, data):
                       plugin_reference_tag)
 
 
-def cigame(parser, xml_parent, data):
+def cigame(registry, xml_parent, data):
     """yaml: cigame
     This plugin introduces a game where users get points
     for improving the builds.
@@ -2330,7 +2573,7 @@ def cigame(parser, xml_parent, data):
     XML.SubElement(xml_parent, 'hudson.plugins.cigame.GamePublisher')
 
 
-def sonar(parser, xml_parent, data):
+def sonar(registry, xml_parent, data):
     """yaml: sonar
     Sonar plugin support.
     Requires the Jenkins `Sonar Plugin.
@@ -2338,25 +2581,27 @@ def sonar(parser, xml_parent, data):
         Analyzing+with+SonarQube+Scanner+for+Jenkins>`_
 
     :arg str jdk: JDK to use (inherited from the job if omitted). (optional)
-    :arg str branch: branch onto which the analysis will be posted (optional)
-    :arg str language: source code language (optional)
+    :arg str branch: branch onto which the analysis will be posted (default '')
+    :arg str language: source code language (default '')
     :arg str root-pom: Root POM (default 'pom.xml')
     :arg bool private-maven-repo: If true, use private Maven repository.
-      (default false)
-    :arg str maven-opts: options given to maven (optional)
-    :arg str additional-properties: sonar analysis parameters (optional)
+        (default false)
+    :arg str maven-opts: options given to maven (default '')
+    :arg str additional-properties: sonar analysis parameters (default '')
     :arg dict skip-global-triggers:
         :Triggers: * **skip-when-scm-change** (`bool`): skip analysis when
-                     build triggered by scm
+                     build triggered by scm (default false)
                    * **skip-when-upstream-build** (`bool`): skip analysis when
-                     build triggered by an upstream build
+                     build triggered by an upstream build (default false)
                    * **skip-when-envvar-defined** (`str`): skip analysis when
                      the specified environment variable is set to true
+                     (default '')
     :arg str settings: Path to use as user settings.xml. It is possible to
-      provide a ConfigFileProvider settings file, see Example below. (optional)
+        provide a ConfigFileProvider settings file, see Example below.
+        (optional)
     :arg str global-settings: Path to use as global settings.xml. It is
-      possible to provide a ConfigFileProvider settings file, see Example
-      below. (optional)
+        possible to provide a ConfigFileProvider settings file, see Example
+        below. (optional)
 
     Requires the Jenkins :jenkins-wiki:`Config File Provider Plugin
     <Config+File+Provider+Plugin>`
@@ -2365,105 +2610,180 @@ def sonar(parser, xml_parent, data):
     This publisher supports the post-build action exposed by the Jenkins
     Sonar Plugin, which is triggering a Sonar Analysis with Maven.
 
-    Example:
+    Minimal Example:
 
-    .. literalinclude:: /../../tests/publishers/fixtures/sonar001.yaml
+    .. literalinclude:: /../../tests/publishers/fixtures/sonar-minimal.yaml
+       :language: yaml
+
+    Full Example:
+    .. literalinclude:: /../../tests/publishers/fixtures/sonar-complete.yaml
        :language: yaml
     """
+
     sonar = XML.SubElement(xml_parent, 'hudson.plugins.sonar.SonarPublisher')
+    sonar.set('plugin', 'sonar')
+
     if 'jdk' in data:
         XML.SubElement(sonar, 'jdk').text = data['jdk']
-    XML.SubElement(sonar, 'branch').text = data.get('branch', '')
-    XML.SubElement(sonar, 'language').text = data.get('language', '')
-    XML.SubElement(sonar, 'rootPom').text = data.get('root-pom', 'pom.xml')
-    XML.SubElement(sonar, 'usePrivateRepository').text = str(
-        data.get('private-maven-repo', False)).lower()
-    XML.SubElement(sonar, 'mavenOpts').text = data.get('maven-opts', '')
-    XML.SubElement(sonar, 'jobAdditionalProperties').text = \
-        data.get('additional-properties', '')
+
+    mappings = [
+        ('branch', 'branch', ''),
+        ('language', 'language', ''),
+        ('root-pom', 'rootPom', 'pom.xml'),
+        ('private-maven-repo', 'usePrivateRepository', False),
+        ('maven-opts', 'mavenOpts', ''),
+        ('additional-properties', 'jobAdditionalProperties', '')
+    ]
+    helpers.convert_mapping_to_xml(sonar, data, mappings, fail_required=True)
+
     if 'skip-global-triggers' in data:
         data_triggers = data['skip-global-triggers']
         triggers = XML.SubElement(sonar, 'triggers')
-        XML.SubElement(triggers, 'skipScmCause').text =   \
-            str(data_triggers.get('skip-when-scm-change', False)).lower()
-        XML.SubElement(triggers, 'skipUpstreamCause').text =  \
-            str(data_triggers.get('skip-when-upstream-build', False)).lower()
-        XML.SubElement(triggers, 'envVar').text =  \
-            data_triggers.get('skip-when-envvar-defined', '')
-    config_file_provider_settings(sonar, data)
+        triggers_mappings = [
+            ('skip-when-scm-change', 'skipScmCause', False),
+            ('skip-when-upstream-build', 'skipUpstreamCause', False),
+            ('skip-when-envvar-defined', 'envVar', '')
+        ]
+        helpers.convert_mapping_to_xml(
+            triggers, data_triggers, triggers_mappings, fail_required=True)
+
+    helpers.config_file_provider_settings(sonar, data)
 
 
-def performance(parser, xml_parent, data):
+def performance(registry, xml_parent, data):
     """yaml: performance
     Publish performance test results from jmeter and junit.
     Requires the Jenkins :jenkins-wiki:`Performance Plugin
     <Performance+Plugin>`.
 
     :arg int failed-threshold: Specify the error percentage threshold that
-                               set the build failed. A negative value means
-                               don't use this threshold (default 0)
+        set the build failed. A negative value means don't use this threshold
+        (default 0)
     :arg int unstable-threshold: Specify the error percentage threshold that
-                                 set the build unstable. A negative value means
-                                 don't use this threshold (default 0)
+        set the build unstable. A negative value means don't use this threshold
+        (default 0)
+    :arg str unstable-response-time-threshold: Average response time threshold
+        (default '')
+    :arg float failed-threshold-positive: Maximum failed percentage for build
+        comparison (default 0.0)
+    :arg float failed-threshold-negative: Minimum failed percentage for build
+        comparison (default 0.0)
+    :arg float unstable-threshold-positive: Maximum unstable percentage for
+        build comparison (default 0.0)
+    :arg float unstable-threshold-negative: Minimum unstable percentage for
+        build comparison (default 0.0)
+    :arg int nth-build-number: Build number for build comparison (default 0)
+    :arg bool mode-relative-thresholds: Relative threshold mode (default false)
+    :arg str config-type: Compare based on (default 'ART')
+
+        :config-type values:
+          * **ART** -- Average Response Time
+          * **MRT** -- Median Response Time
+          * **PRT** -- Percentile Response Time
+
+    :arg bool mode-of-threshold: Mode of threshold, true for relative threshold
+        and false for error threshold (default false)
+    :arg bool fail-build: Fail build when result files are not present
+        (default false)
+    :arg bool compare-build-previous: Compare with previous build
+        (default false)
+    :arg bool mode-performance-per-test-case: Performance Per Test Case Mode
+        (default true)
+    :arg bool mode-thoughput: Show Throughput Chart (default false)
+
     :arg dict report:
 
-       :(jmeter or junit): (`dict` or `str`): Specify a custom report file
+        :(jmeter or junit): (`dict` or `str`): Specify a custom report file
          (optional; jmeter default \**/*.jtl, junit default **/TEST-\*.xml)
 
-    Examples:
+    Minimal Example:
 
-    .. literalinclude:: /../../tests/publishers/fixtures/performance001.yaml
+    .. literalinclude::
+       /../../tests/publishers/fixtures/performance-minimal.yaml
        :language: yaml
 
-    .. literalinclude:: /../../tests/publishers/fixtures/performance002.yaml
-       :language: yaml
+    Full Example:
 
-    .. literalinclude:: /../../tests/publishers/fixtures/performance003.yaml
+    .. literalinclude::
+       /../../tests/publishers/fixtures/performance-complete.yaml
        :language: yaml
     """
-    logger = logging.getLogger(__name__)
-
     perf = XML.SubElement(xml_parent, 'hudson.plugins.performance.'
                                       'PerformancePublisher')
-    XML.SubElement(perf, 'errorFailedThreshold').text = str(data.get(
-        'failed-threshold', 0))
-    XML.SubElement(perf, 'errorUnstableThreshold').text = str(data.get(
-        'unstable-threshold', 0))
+    perf.set('plugin', 'performance')
+    types = ['ART', 'MRT', 'PRT']
+    mappings = [
+        ('failed-threshold', 'errorFailedThreshold', 0),
+        ('unstable-threshold', 'errorUnstableThreshold', 0),
+        ('unstable-response-time-threshold',
+         'errorUnstableResponseTimeThreshold',
+         ''),
+        ('failed-threshold-positive',
+         'relativeFailedThresholdPositive',
+         '0.0'),
+        ('failed-threshold-negative',
+         'relativeFailedThresholdNegative',
+         '0.0'),
+        ('unstable-threshold-positive',
+         'relativeUnstableThresholdPositive',
+         '0.0'),
+        ('unstable-threshold-negative',
+         'relativeUnstableThresholdNegative',
+         '0.0'),
+        ('nth-build-number', 'nthBuildNumber', 0),
+        ('mode-relative-thresholds', 'modeRelativeThresholds', False),
+        ('config-type', 'configType', 'ART', types),
+        ('mode-of-threshold', 'modeOfThreshold', False),
+        ('fail-build', 'failBuildIfNoResultFile', False),
+        ('compare-build-previous', 'compareBuildPrevious', False),
+        ('mode-performance-per-test-case', 'modePerformancePerTestCase', True),
+        ('mode-thoughput', 'modeThroughput', False)
+    ]
+    helpers.convert_mapping_to_xml(perf, data, mappings, fail_required=True)
+
     parsers = XML.SubElement(perf, 'parsers')
-    for item in data['report']:
-        if isinstance(item, dict):
-            item_name = next(iter(item.keys()))
-            item_values = item.get(item_name, None)
-            if item_name == 'jmeter':
-                jmhold = XML.SubElement(parsers, 'hudson.plugins.performance.'
-                                                 'JMeterParser')
-                XML.SubElement(jmhold, 'glob').text = str(item_values)
-            elif item_name == 'junit':
-                juhold = XML.SubElement(parsers, 'hudson.plugins.performance.'
-                                                 'JUnitParser')
-                XML.SubElement(juhold, 'glob').text = str(item_values)
-            else:
-                logger.fatal("You have not specified jmeter or junit, or "
-                             "you have incorrectly assigned the key value.")
-                sys.exit(1)
-        elif isinstance(item, str):
-            if item == 'jmeter':
-                jmhold = XML.SubElement(parsers, 'hudson.plugins.performance.'
-                                                 'JMeterParser')
-                XML.SubElement(jmhold, 'glob').text = '**/*.jtl'
-            elif item == 'junit':
-                juhold = XML.SubElement(parsers, 'hudson.plugins.performance.'
-                                                 'JUnitParser')
-                XML.SubElement(juhold, 'glob').text = '**/TEST-*.xml'
-            else:
-                logger.fatal("You have not specified jmeter or junit, or "
-                             "you have incorrectly assigned the key value.")
-                sys.exit(1)
+    if 'report' in data:
+        for item in data['report']:
+            if isinstance(item, dict):
+                item_name = next(iter(item.keys()))
+                item_values = item.get(item_name, None)
+                if item_name == 'jmeter':
+                    jmhold = XML.SubElement(parsers, 'hudson.plugins.'
+                                                     'performance.'
+                                                     'JMeterParser')
+                    XML.SubElement(jmhold, 'glob').text = str(item_values)
+                elif item_name == 'junit':
+                    juhold = XML.SubElement(parsers, 'hudson.plugins.'
+                                                     'performance.'
+                                                     'JUnitParser')
+                    XML.SubElement(juhold, 'glob').text = str(item_values)
+                else:
+                    raise JenkinsJobsException("You have not specified jmeter "
+                                               "or junit, or you have "
+                                               "incorrectly assigned the key "
+                                               "value.")
+            elif isinstance(item, str):
+                if item == 'jmeter':
+                    jmhold = XML.SubElement(parsers, 'hudson.plugins.'
+                                                     'performance.'
+                                                     'JMeterParser')
+                    XML.SubElement(jmhold, 'glob').text = '**/*.jtl'
+                elif item == 'junit':
+                    juhold = XML.SubElement(parsers, 'hudson.plugins.'
+                                                     'performance.'
+                                                     'JUnitParser')
+                    XML.SubElement(juhold, 'glob').text = '**/TEST-*.xml'
+                else:
+                    raise JenkinsJobsException("You have not specified jmeter "
+                                               "or junit, or you have "
+                                               "incorrectly assigned the key "
+                                               "value.")
 
 
-def join_trigger(parser, xml_parent, data):
+def join_trigger(registry, xml_parent, data):
     """yaml: join-trigger
-    Trigger a job after all the immediate downstream jobs have completed
+    Trigger a job after all the immediate downstream jobs have completed.
+    Requires the Jenkins :jenkins-wiki:`Join Plugin <Join+Plugin>`.
 
     :arg bool even-if-unstable: if true jobs will trigger even if some
         downstream jobs are marked as unstable (default false)
@@ -2483,14 +2803,14 @@ def join_trigger(parser, xml_parent, data):
 
     publishers = XML.SubElement(jointrigger, 'joinPublishers')
     for pub in data.get('publishers', []):
-        for edited_node in create_publishers(parser, pub):
+        for edited_node in create_publishers(registry, pub):
             publishers.append(edited_node)
 
     unstable = str(data.get('even-if-unstable', 'false')).lower()
     XML.SubElement(jointrigger, 'evenIfDownstreamUnstable').text = unstable
 
 
-def jabber(parser, xml_parent, data):
+def jabber(registry, xml_parent, data):
     """yaml: jabber
     Integrates Jenkins with the Jabber/XMPP instant messaging protocol
     Requires the Jenkins :jenkins-wiki:`Jabber Plugin <Jabber+Plugin>`.
@@ -2515,6 +2835,7 @@ def jabber(parser, xml_parent, data):
           * **all** -- Always
           * **failure** -- On any failure
           * **failure-fixed** -- On failure and fixes
+          * **new-failure-fixed** -- On new failure and fixes
           * **change** -- Only on state change
     :arg dict message: Channel notification message (default summary-scm)
 
@@ -2524,45 +2845,55 @@ def jabber(parser, xml_parent, data):
           * **summary-build** -- Summary and build parameters
           * **summary-scm-fail** -- Summary, SCM changes, and failed tests
 
-    Example:
+    Minimal Example:
 
-    .. literalinclude:: /../../tests/publishers/fixtures/jabber001.yaml
+    .. literalinclude:: /../../tests/publishers/fixtures/jabber-minimal.yaml
+       :language: yaml
+
+    Full Example:
+
+    .. literalinclude:: /../../tests/publishers/fixtures/jabber-complete.yaml
        :language: yaml
     """
     j = XML.SubElement(xml_parent, 'hudson.plugins.jabber.im.transport.'
                        'JabberPublisher')
+    j.set('plugin', 'jabber')
+
     t = XML.SubElement(j, 'targets')
     if 'group-targets' in data:
         for group in data['group-targets']:
             gcimt = XML.SubElement(t, 'hudson.plugins.im.'
                                    'GroupChatIMMessageTarget')
+            gcimt.set('plugin', 'instant-messaging')
             XML.SubElement(gcimt, 'name').text = group
             XML.SubElement(gcimt, 'notificationOnly').text = 'false'
     if 'individual-targets' in data:
         for individual in data['individual-targets']:
             dimt = XML.SubElement(t, 'hudson.plugins.im.'
                                   'DefaultIMMessageTarget')
+            dimt.set('plugin', 'instant-messaging')
             XML.SubElement(dimt, 'value').text = individual
     strategy = data.get('strategy', 'all')
     strategydict = {'all': 'ALL',
                     'failure': 'ANY_FAILURE',
                     'failure-fixed': 'FAILURE_AND_FIXED',
+                    'new-failure-fixed': 'NEW_FAILURE_AND_FIXED',
                     'change': 'STATECHANGE_ONLY'}
     if strategy not in strategydict:
         raise JenkinsJobsException("Strategy entered is not valid, must be " +
                                    "one of: all, failure, failure-fixed, or "
                                    "change")
     XML.SubElement(j, 'strategy').text = strategydict[strategy]
-    XML.SubElement(j, 'notifyOnBuildStart').text = str(
-        data.get('notify-on-build-start', False)).lower()
-    XML.SubElement(j, 'notifySuspects').text = str(
-        data.get('notify-scm-committers', False)).lower()
-    XML.SubElement(j, 'notifyCulprits').text = str(
-        data.get('notify-scm-culprits', False)).lower()
-    XML.SubElement(j, 'notifyFixers').text = str(
-        data.get('notify-scm-fixers', False)).lower()
-    XML.SubElement(j, 'notifyUpstreamCommitters').text = str(
-        data.get('notify-upstream-committers', False)).lower()
+
+    mappings = [
+        ('notify-on-build-start', 'notifyOnBuildStart', False),
+        ('notify-scm-committers', 'notifySuspects', False),
+        ('notify-scm-culprits', 'notifyCulprits', False),
+        ('notify-scm-fixers', 'notifyFixers', False),
+        ('notify-upstream-committers', 'notifyUpstreamCommitters', False)
+    ]
+    helpers.convert_mapping_to_xml(j, data, mappings, fail_required=True)
+
     message = data.get('message', 'summary-scm')
     messagedict = {'summary-scm': 'DefaultBuildToChatNotifier',
                    'summary': 'SummaryOnlyBuildToChatNotifier',
@@ -2577,7 +2908,7 @@ def jabber(parser, xml_parent, data):
     XML.SubElement(j, 'matrixMultiplier').text = 'ONLY_CONFIGURATIONS'
 
 
-def workspace_cleanup(parser, xml_parent, data):
+def workspace_cleanup(registry, xml_parent, data):
     """yaml: workspace-cleanup (post-build)
 
     Requires the Jenkins :jenkins-wiki:`Workspace Cleanup Plugin
@@ -2587,24 +2918,30 @@ def workspace_cleanup(parser, xml_parent, data):
 
     :arg list include: list of files to be included
     :arg list exclude: list of files to be excluded
-    :arg bool dirmatch: Apply pattern to directories too (default: false)
+    :arg bool dirmatch: Apply pattern to directories too (default false)
     :arg list clean-if: clean depending on build status
 
         :clean-if values:
-            * **success** (`bool`) (default: true)
-            * **unstable** (`bool`) (default: true)
-            * **failure** (`bool`) (default: true)
-            * **aborted** (`bool`) (default: true)
-            * **not-built** (`bool`)  (default: true)
-    :arg bool fail-build: Fail the build if the cleanup fails (default: true)
-    :arg bool clean-parent: Cleanup matrix parent workspace (default: false)
+            * **success** (`bool`) (default true)
+            * **unstable** (`bool`) (default true)
+            * **failure** (`bool`) (default true)
+            * **aborted** (`bool`) (default true)
+            * **not-built** (`bool`)  (default true)
+    :arg bool fail-build: Fail the build if the cleanup fails (default true)
+    :arg bool clean-parent: Cleanup matrix parent workspace (default false)
     :arg str external-deletion-command: external deletion command to run
         against files and directories
 
-    Example:
+    Minimal Example:
 
     .. literalinclude::
-        /../../tests/publishers/fixtures/workspace-cleanup001.yaml
+        /../../tests/publishers/fixtures/workspace-cleanup-minimal.yaml
+       :language: yaml
+
+    Full Example:
+
+    .. literalinclude::
+        /../../tests/publishers/fixtures/workspace-cleanup-complete.yaml
        :language: yaml
     """
 
@@ -2624,12 +2961,12 @@ def workspace_cleanup(parser, xml_parent, data):
         XML.SubElement(ptrn, 'pattern').text = exc
         XML.SubElement(ptrn, 'type').text = "EXCLUDE"
 
-    XML.SubElement(p, 'deleteDirs').text = \
-        str(data.get("dirmatch", False)).lower()
-    XML.SubElement(p, 'cleanupMatrixParent').text = \
-        str(data.get("clean-parent", False)).lower()
-    XML.SubElement(p, 'externalDelete').text = \
-        str(data.get('external-deletion-command', ''))
+    mappings = [
+        ('dirmatch', 'deleteDirs', False),
+        ('clean-parent', 'cleanupMatrixParent', False),
+        ('external-deletion-command', 'externalDelete', '')
+    ]
+    helpers.convert_mapping_to_xml(p, data, mappings, fail_required=True)
 
     mask = [('success', 'cleanWhenSuccess'),
             ('unstable', 'cleanWhenUnstable'),
@@ -2652,7 +2989,7 @@ def workspace_cleanup(parser, xml_parent, data):
         XML.SubElement(p, 'notFailBuild').text = 'false'
 
 
-def maven_deploy(parser, xml_parent, data):
+def maven_deploy(registry, xml_parent, data):
     """yaml: maven-deploy
     Deploy artifacts to Maven repository.
 
@@ -2685,7 +3022,7 @@ def maven_deploy(parser, xml_parent, data):
         XML.SubElement(p, 'releaseEnvVar').text = data['release-env-var']
 
 
-def artifactory(parser, xml_parent, data):
+def artifactory(registry, xml_parent, data):
     """yaml: artifactory
     Uses/requires the Artifactory plugin to deploy artifacts to
     Artifactory Server.
@@ -2699,40 +3036,40 @@ def artifactory(parser, xml_parent, data):
     :arg str release-repo-key: Release repository name (default '')
     :arg str snapshot-repo-key: Snapshots repository name (default '')
     :arg bool publish-build-info: Push build metadata with artifacts
-        (default False)
+        (default false)
     :arg bool discard-old-builds:
-        Remove older build info from Artifactory (default False)
+        Remove older build info from Artifactory (default false)
     :arg bool discard-build-artifacts:
-        Remove older build artifacts from Artifactory (default False)
+        Remove older build artifacts from Artifactory (default false)
     :arg bool even-if-unstable: Deploy artifacts even when the build
-        is unstable (default False)
+        is unstable (default false)
     :arg bool run-checks: Run automatic license scanning check after the
-        build is complete (default False)
+        build is complete (default false)
     :arg bool include-publish-artifacts: Include the build's published
         module artifacts in the license violation checks if they are
         also used as dependencies for other modules in this build
-        (default False)
+        (default false)
     :arg bool pass-identified-downstream: When true, a build parameter
         named ARTIFACTORY_BUILD_ROOT with a value of
         ${JOB_NAME}-${BUILD_NUMBER} will be sent to downstream builds
-        (default False)
+        (default false)
     :arg bool license-auto-discovery: Tells Artifactory not to try
         and automatically analyze and tag the build's dependencies
-        with license information upon deployment (default True)
+        with license information upon deployment (default true)
     :arg bool enable-issue-tracker-integration: When the Jenkins
         JIRA plugin is enabled, synchronize information about JIRA
         issues to Artifactory and attach issue information to build
-        artifacts (default False)
+        artifacts (default false)
     :arg bool aggregate-build-issues: When the Jenkins JIRA plugin
         is enabled, include all issues from previous builds up to the
         latest build status defined in "Aggregation Build Status"
-        (default False)
+        (default false)
     :arg bool allow-promotion-of-non-staged-builds: The build
         promotion operation will be available to all successful builds
-        instead of only staged ones (default False)
+        instead of only staged ones (default false)
     :arg bool filter-excluded-artifacts-from-build: Add the excluded
         files to the excludedArtifacts list and remove them from the
-        artifacts list in the build info (default False)
+        artifacts list in the build info (default false)
     :arg str scopes:  A list of dependency scopes/configurations to run
         license violation checks on. If left empty all dependencies from
         all scopes will be checked (default '')
@@ -2753,22 +3090,22 @@ def artifactory(parser, xml_parent, data):
         all dependencies from all scopes will be checked (default '')
     :arg bool black-duck-run-checks: Automatic Black Duck Code Center
         compliance checks will occur after the build completes
-        (default False)
+        (default false)
     :arg bool black-duck-include-published-artifacts: Include the build's
         published module artifacts in the license violation checks if they
         are also used as dependencies for other modules in this build
-        (default False)
+        (default false)
     :arg bool auto-create-missing-component-requests: Auto create
         missing components in Black Duck Code Center application after
         the build is completed and deployed in Artifactory
-        (default True)
+        (default true)
     :arg bool auto-discard-stale-component-requests: Auto discard
         stale components in Black Duck Code Center application after
         the build is completed and deployed in Artifactory
-        (default True)
+        (default true)
     :arg bool deploy-artifacts: Push artifacts to the Artifactory
         Server. Use deployment-include-patterns and
-        deployment-exclude-patterns to filter deploy artifacts. (default True)
+        deployment-exclude-patterns to filter deploy artifacts. (default true)
     :arg list deployment-include-patterns: New line or comma separated mappings
         of build artifacts to published artifacts. Supports Ant-style wildcards
         mapping to target directories. E.g.: */*.zip=>dir (default [])
@@ -2778,7 +3115,7 @@ def artifactory(parser, xml_parent, data):
         accessible by the build process. Jenkins-specific env variables
         are always included. Use env-vars-include-patterns and
         env-vars-exclude-patterns to filter variables to publish,
-        (default False)
+        (default false)
     :arg list env-vars-include-patterns: Comma or space-separated list of
         environment variables that will be included as part of the published
         build info. Environment variables may contain the * and the ? wildcards
@@ -2799,14 +3136,14 @@ def artifactory(parser, xml_parent, data):
         xml_parent, 'org.jfrog.hudson.ArtifactoryRedeployPublisher')
 
     # optional_props
-    artifactory_optional_props(artifactory, data, 'publishers')
+    helpers.artifactory_optional_props(artifactory, data, 'publishers')
 
     XML.SubElement(artifactory, 'matrixParams').text = ','.join(
         data.get('matrix-params', []))
 
     # details
     details = XML.SubElement(artifactory, 'details')
-    artifactory_common_details(details, data)
+    helpers.artifactory_common_details(details, data)
 
     XML.SubElement(details, 'repositoryKey').text = data.get(
         'release-repo-key', '')
@@ -2817,13 +3154,130 @@ def artifactory(parser, xml_parent, data):
     XML.SubElement(plugin, 'pluginName').text = 'None'
 
     # artifactDeploymentPatterns
-    artifactory_deployment_patterns(artifactory, data)
+    helpers.artifactory_deployment_patterns(artifactory, data)
 
     # envVarsPatterns
-    artifactory_env_vars_patterns(artifactory, data)
+    helpers.artifactory_env_vars_patterns(artifactory, data)
 
 
-def text_finder(parser, xml_parent, data):
+def test_fairy(registry, xml_parent, data):
+    """yaml: test-fairy
+    This plugin helps you to upload Android APKs or iOS IPA files to
+    www.testfairy.com.
+
+    Requires the Jenkins :jenkins-wiki:`Test Fairy Plugin
+    <TestFairy+Plugin>`.
+
+    :arg str platform: Select platform to upload to, **android** or **ios**
+        (required)
+
+    Android Only:
+
+    :arg str proguard-file: Path to Proguard file. Path of mapping.txt from
+        your proguard output directory. (default '')
+    :arg str storepass: Password for the keystore (default android)
+    :arg str alias: alias for key (default androiddebugkey)
+    :arg str keypass: password for the key (default '')
+    :arg str keystorepath: Path to Keystore file (required)
+
+    IOS Only:
+
+    :arg str dSYM-file: Path to .dSYM.zip file (default '')
+
+    All:
+
+    :arg str apikey: TestFairy API_KEY. Find it in your TestFairy account
+        settings (required)
+    :arg str appfile: Path to App file (.apk) or (.ipa). For example:
+        $WORKSPACE/[YOUR_FILE_NAME].apk or full path to the apk file.
+        (required)
+    :arg str tester-groups: Tester groups to notify (default '')
+    :arg bool notify-testers: Send email with changelogs to testers
+        (default false)
+    :arg bool autoupdate: Automatic update (default false)
+    :arg str max-duration: Duration of the session (default 10m)
+
+        :max-duration values:
+            * **10m**
+            * **60m**
+            * **300m**
+            * **1440m**
+    :arg bool record-on-background: Record on background (default false)
+    :arg bool data-only-wifi: Record data only in wifi (default false)
+    :arg bool video-enabled: Record video (default true)
+    :arg int screenshot-interval: Time interval between screenshots
+        (default 1)
+
+        :screenshot-interval values:
+            * **1**
+            * **2**
+            * **5**
+    :arg str video-quality: Video quality (default high)
+
+        :video-quality values:
+            * **high**
+            * **medium**
+            * **low**
+    :arg bool cpu: Enable CPU metrics (default true)
+    :arg bool memory: Enable memory metrics (default true)
+    :arg bool logs: Enable logs metrics (default true)
+    :arg bool network: Enable network metrics (default false)
+    :arg bool phone-signal: Enable phone signal metrics (default false)
+    :arg bool wifi: Enable wifi metrics (default false)
+    :arg bool gps: Enable gps metrics (default false)
+    :arg bool battery: Enable battery metrics (default false)
+    :arg bool opengl: Enable opengl metrics (default false)
+
+    Example:
+
+    .. literalinclude::
+       /../../tests/publishers/fixtures/test-fairy-android-minimal.yaml
+       :language: yaml
+
+    .. literalinclude::
+       /../../tests/publishers/fixtures/test-fairy-android001.yaml
+       :language: yaml
+
+    .. literalinclude::
+       /../../tests/publishers/fixtures/test-fairy-ios-minimal.yaml
+       :language: yaml
+
+    .. literalinclude::
+       /../../tests/publishers/fixtures/test-fairy-ios001.yaml
+       :language: yaml
+    """
+    platform = data.get('platform')
+    valid_platforms = ['android', 'ios']
+
+    if 'platform' not in data:
+        raise MissingAttributeError('platform')
+    if platform == 'android':
+        root = XML.SubElement(
+            xml_parent,
+            'org.jenkinsci.plugins.testfairy.TestFairyAndroidRecorder')
+        helpers.test_fairy_common(root, data)
+
+        mappings = [
+            ('proguard-file', 'mappingFile', ''),
+            ('keystorepath', 'keystorePath', None),
+            ('storepass', 'storepass', 'android'),
+            ('alias', 'alias', 'androiddebugkey'),
+            ('keypass', 'keypass', '')]
+        helpers.convert_mapping_to_xml(
+            root, data, mappings, fail_required=True)
+    elif platform == 'ios':
+        root = XML.SubElement(
+            xml_parent, 'org.jenkinsci.plugins.testfairy.TestFairyIosRecorder')
+        helpers.test_fairy_common(root, data)
+
+        mappings = [('dSYM-file', 'mappingFile', '')]
+        helpers.convert_mapping_to_xml(
+            root, data, mappings, fail_required=True)
+    else:
+        raise InvalidAttributeError('platform', platform, valid_platforms)
+
+
+def text_finder(registry, xml_parent, data):
     """yaml: text-finder
     This plugin lets you search keywords in the files you specified and
     additionally check build status
@@ -2834,11 +3288,11 @@ def text_finder(parser, xml_parent, data):
     :arg str regexp: Specify a regular expression
     :arg str fileset: Specify the path to search
     :arg bool also-check-console-output:
-              Search the console output (default False)
+              Search the console output (default false)
     :arg bool succeed-if-found:
-              Force a build to succeed if a string was found (default False)
+              Force a build to succeed if a string was found (default false)
     :arg bool unstable-if-found:
-              Set build unstable instead of failing the build (default False)
+              Set build unstable instead of failing the build (default false)
 
 
     Example:
@@ -2860,18 +3314,18 @@ def text_finder(parser, xml_parent, data):
     XML.SubElement(finder, 'unstableIfFound').text = unstable_if_found
 
 
-def html_publisher(parser, xml_parent, data):
+def html_publisher(registry, xml_parent, data):
     """yaml: html-publisher
     This plugin publishes HTML reports.
 
     Requires the Jenkins :jenkins-wiki:`HTML Publisher Plugin
     <HTML+Publisher+Plugin>`.
 
-    :arg str name: Report name
-    :arg str dir: HTML directory to archive
-    :arg str files: Specify the pages to display
-    :arg bool keep-all: keep HTML reports for each past build (Default False)
-    :arg bool allow-missing: Allow missing HTML reports (Default False)
+    :arg str name: Report name (required)
+    :arg str dir: HTML directory to archive (required)
+    :arg str files: Specify the pages to display (required)
+    :arg bool keep-all: keep HTML reports for each past build (default false)
+    :arg bool allow-missing: Allow missing HTML reports (default false)
     :arg bool link-to-last-build: If this and 'keep-all' both are true, it
         publishes the link on project level even if build failed.
         (default false)
@@ -2886,19 +3340,20 @@ def html_publisher(parser, xml_parent, data):
     reporter = XML.SubElement(xml_parent, 'htmlpublisher.HtmlPublisher')
     targets = XML.SubElement(reporter, 'reportTargets')
     ptarget = XML.SubElement(targets, 'htmlpublisher.HtmlPublisherTarget')
-    XML.SubElement(ptarget, 'reportName').text = data['name']
-    XML.SubElement(ptarget, 'reportDir').text = data['dir']
-    XML.SubElement(ptarget, 'reportFiles').text = data['files']
-    XML.SubElement(ptarget, 'alwaysLinkToLastBuild').text = str(
-        data.get('link-to-last-build', False)).lower()
-    keep_all = str(data.get('keep-all', False)).lower()
-    XML.SubElement(ptarget, 'keepAll').text = keep_all
-    allow_missing = str(data.get('allow-missing', False)).lower()
-    XML.SubElement(ptarget, 'allowMissing').text = allow_missing
+
+    mapping = [
+        ('name', 'reportName', None),
+        ('dir', 'reportDir', None),
+        ('files', 'reportFiles', None),
+        ('link-to-last-build', 'alwaysLinkToLastBuild', False),
+        ('keep-all', 'keepAll', False),
+        ('allow-missing', 'allowMissing', False),
+    ]
+    helpers.convert_mapping_to_xml(ptarget, data, mapping, fail_required=True)
     XML.SubElement(ptarget, 'wrapperName').text = "htmlpublisher-wrapper.html"
 
 
-def rich_text_publisher(parser, xml_parent, data):
+def rich_text_publisher(registry, xml_parent, data):
     """yaml: rich-text-publisher
     This plugin puts custom rich text message to the Build pages and Job main
     page.
@@ -2906,86 +3361,104 @@ def rich_text_publisher(parser, xml_parent, data):
     Requires the Jenkins :jenkins-wiki:`Rich Text Publisher Plugin
     <Rich+Text+Publisher+Plugin>`.
 
-    :arg str stable-text: The stable text
+    :arg str stable-text: The stable text (required)
     :arg str unstable-text: The unstable text if different from stable
-      (default '')
+        (default '')
+    :arg bool unstable-as-stable: The same text block is used for stable and
+         unstable builds (default true)
     :arg str failed-text: The failed text if different from stable (default '')
-    :arg str parser-name: HTML, Confluence or WikiText
+    :arg bool failed-as-stable: The same text block is used for stable and
+         failed builds (default true)
+    :arg str parser-name: HTML, Confluence or WikiText (default 'WikiText')
 
 
-    Example:
+    Minimal Example:
 
-    .. literalinclude::  /../../tests/publishers/fixtures/richtext001.yaml
+    .. literalinclude::  /../../tests/publishers/fixtures/richtext-minimal.yaml
        :language: yaml
 
+    Full Example:
+
+    .. literalinclude::
+       /../../tests/publishers/fixtures/richtext-complete.yaml
+       :language: yaml
     """
 
     parsers = ['HTML', 'Confluence', 'WikiText']
-    parser_name = data['parser-name']
-    if parser_name not in parsers:
-        raise JenkinsJobsException('parser-name must be one of: %s' %
-                                   ", ".join(parsers))
-
     reporter = XML.SubElement(
         xml_parent,
         'org.korosoft.jenkins.plugin.rtp.RichTextPublisher')
-    XML.SubElement(reporter, 'stableText').text = data['stable-text']
-    XML.SubElement(reporter, 'unstableText').text =\
-        data.get('unstable-text', '')
-    XML.SubElement(reporter, 'failedText').text = data.get('failed-text', '')
-    XML.SubElement(reporter, 'unstableAsStable').text =\
-        'False' if data.get('unstable-text', '') else 'True'
-    XML.SubElement(reporter, 'failedAsStable').text =\
-        'False' if data.get('failed-text', '') else 'True'
-    XML.SubElement(reporter, 'parserName').text = parser_name
+    reporter.set('plugin', 'rich-text-publisher-plugin')
+
+    mappings = [
+        ('stable-text', 'stableText', None),
+        ('unstable-text', 'unstableText', ''),
+        ('failed-text', 'failedText', ''),
+        ('unstable-as-stable', 'unstableAsStable', True),
+        ('failed-as-stable', 'failedAsStable', True),
+        ('parser-name', 'parserName', 'WikiText', parsers)
+    ]
+    helpers.convert_mapping_to_xml(
+        reporter, data, mappings, fail_required=True)
 
 
-def tap(parser, xml_parent, data):
+def tap(registry, xml_parent, data):
     """yaml: tap
     Adds support to TAP test result files
 
     Requires the Jenkins :jenkins-wiki:`TAP Plugin <TAP+Plugin>`.
 
-    :arg str results: TAP test result files
-    :arg bool fail-if-no-results: Fail if no result (default False)
+    :arg str results: TAP test result files (required)
+    :arg bool fail-if-no-results: Fail if no result (default false)
     :arg bool failed-tests-mark-build-as-failure:
-                Mark build as failure if test fails (default False)
-    :arg bool output-tap-to-console: Output tap to console (default True)
-    :arg bool enable-subtests: Enable subtests (Default True)
-    :arg bool discard-old-reports: Discard old reports (Default False)
-    :arg bool todo-is-failure: Handle TODO's as failures (Default True)
+                Mark build as failure if test fails (default false)
+    :arg bool output-tap-to-console: Output tap to console (default true)
+    :arg bool enable-subtests: Enable subtests (default true)
+    :arg bool discard-old-reports: Discard old reports (default false)
+    :arg bool todo-is-failure: Handle TODO's as failures (default true)
+    :arg bool include-comment-diagnostics: Include comment diagnostics (#) in
+        the results table (>=1.12) (default false)
+    :arg bool validate-tests: Validate number of tests (>=1.13) (default false)
+    :arg bool plan-required: TAP plan required? (>=1.17) (default true)
+    :arg bool verbose: Print a message for each TAP stream file (>=1.17)
+        (default true)
+    :arg bool show-only-failures: show only test failures (>=1.17)
+        (default false)
 
+    Full Example:
 
-    Example:
+    .. literalinclude:: /../../tests/publishers/fixtures/tap-full.yaml
+       :language: yaml
 
-    .. literalinclude:: /../../tests/publishers/fixtures/tap001.yaml
+    Minimal Example:
+
+    .. literalinclude:: /../../tests/publishers/fixtures/tap-minimal.yaml
        :language: yaml
     """
 
     tap = XML.SubElement(xml_parent, 'org.tap4j.plugin.TapPublisher')
+    tap.set('plugin', 'tap')
 
-    XML.SubElement(tap, 'testResults').text = data['results']
-
-    XML.SubElement(tap, 'failIfNoResults').text = str(
-        data.get('fail-if-no-results', False)).lower()
-
-    XML.SubElement(tap, 'failedTestsMarkBuildAsFailure').text = str(
-        data.get('failed-tests-mark-build-as-failure', False)).lower()
-
-    XML.SubElement(tap, 'outputTapToConsole').text = str(
-        data.get('output-tap-to-console', True)).lower()
-
-    XML.SubElement(tap, 'enableSubtests').text = str(
-        data.get('enable-subtests', True)).lower()
-
-    XML.SubElement(tap, 'discardOldReports').text = str(
-        data.get('discard-old-reports', False)).lower()
-
-    XML.SubElement(tap, 'todoIsFailure').text = str(
-        data.get('todo-is-failure', True)).lower()
+    mappings = [
+        ('results', 'testResults', None),
+        ('fail-if-no-results', 'failIfNoResults', False),
+        ('failed-tests-mark-build-as-failure',
+         'failedTestsMarkBuildAsFailure',
+         False),
+        ('output-tap-to-console', 'outputTapToConsole', True),
+        ('enable-subtests', 'enableSubtests', True),
+        ('discard-old-reports', 'discardOldReports', False),
+        ('todo-is-failure', 'todoIsFailure', True),
+        ('include-comment-diagnostics', 'includeCommentDiagnostics', False),
+        ('validate-tests', 'validateNumberOfTests', False),
+        ('plan-required', 'planRequired', True),
+        ('verbose', 'verbose', True),
+        ('show-only-failures', 'showOnlyFailures', False),
+    ]
+    helpers.convert_mapping_to_xml(tap, data, mappings, fail_required=True)
 
 
-def post_tasks(parser, xml_parent, data):
+def post_tasks(registry, xml_parent, data):
     """yaml: post-tasks
     Adds support to post build task plugin
 
@@ -3038,7 +3511,7 @@ def post_tasks(parser, xml_parent, data):
             task.get('script', ''))
 
 
-def postbuildscript(parser, xml_parent, data):
+def postbuildscript(registry, xml_parent, data):
     """yaml: postbuildscript
     Executes additional builders, script or Groovy after the build is
     complete.
@@ -3052,14 +3525,14 @@ def postbuildscript(parser, xml_parent, data):
     :arg list builders: Any supported builders, see :doc:`builders`.
     :arg bool onsuccess: Deprecated, replaced with script-only-if-succeeded
     :arg bool script-only-if-succeeded: Scripts and builders are run only if
-                                        the build succeeded (default True)
+                                        the build succeeded (default true)
     :arg bool onfailure: Deprecated, replaced with script-only-if-failed
     :arg bool script-only-if-failed: Scripts and builders are run only if the
-                                     build failed (default False)
+                                     build failed (default false)
     :arg bool mark-unstable-if-failed: Build will be marked unstable
                                        if job will be successfully completed
                                        but publishing script will return
-                                       non zero exit code (default False)
+                                       non zero exit code (default false)
     :arg str execute-on: For matrix projects, scripts can be run after each
                          axis is built (`axes`), after all axis of the matrix
                          are built (`matrix`) or after each axis AND the matrix
@@ -3131,8 +3604,7 @@ def postbuildscript(parser, xml_parent, data):
         if step == 'builders':
             build_steps_xml = XML.SubElement(pbs_xml, 'buildSteps')
             for builder in script_data:
-                parser.registry.dispatch('builder', parser, build_steps_xml,
-                                         builder)
+                registry.dispatch('builder', build_steps_xml, builder)
 
     # When to run the build? Note the plugin let one specify both options
     # although they are antinomic
@@ -3171,32 +3643,41 @@ def postbuildscript(parser, xml_parent, data):
         execute_on_xml.text = execute_on.upper()
 
 
-def xml_summary(parser, xml_parent, data):
+def xml_summary(registry, xml_parent, data):
     """yaml: xml-summary
     Adds support for the Summary Display Plugin
 
     Requires the Jenkins :jenkins-wiki:`Summary Display Plugin
     <Summary+Display+Plugin>`.
 
-    :arg str files: Files to parse (default '')
+    :arg str files: Files to parse (required)
     :arg bool shown-on-project-page: Display summary on project page
-        (default 'false')
+        (default false)
 
-    Example:
+    Minimal Example:
 
-    .. literalinclude:: /../../tests/publishers/fixtures/xml-summary001.yaml
+    .. literalinclude::
+       /../../tests/publishers/fixtures/xml-summary-minimal.yaml
+       :language: yaml
+
+    Full Example:
+
+    .. literalinclude:: /../../tests/publishers/fixtures/xml-summary-full.yaml
        :language: yaml
     """
 
-    summary = XML.SubElement(xml_parent,
-                             'hudson.plugins.summary__report.'
-                             'ACIPluginPublisher')
-    XML.SubElement(summary, 'name').text = data['files']
-    XML.SubElement(summary, 'shownOnProjectPage').text = str(
-        data.get('shown-on-project-page', 'false'))
+    summary = XML.SubElement(
+        xml_parent, 'hudson.plugins.summary__report.ACIPluginPublisher')
+    summary.set('plugin', 'summary_report')
+
+    mapping = [
+        ('files', 'name', None),
+        ('shown-on-project-page', 'shownOnProjectPage', False),
+    ]
+    helpers.convert_mapping_to_xml(summary, data, mapping, fail_required=True)
 
 
-def robot(parser, xml_parent, data):
+def robot(registry, xml_parent, data):
     """yaml: robot
     Adds support for the Robot Framework Plugin
 
@@ -3204,7 +3685,7 @@ def robot(parser, xml_parent, data):
     <Robot+Framework+Plugin>`.
 
     :arg str output-path: Path to directory containing robot xml and html files
-        relative to build workspace. (default '')
+        relative to build workspace. (required)
     :arg str log-file-link: Name of log or report file to be linked on jobs
         front page (default '')
     :arg str report-html: Name of the html file containing robot test report
@@ -3222,36 +3703,41 @@ def robot(parser, xml_parent, data):
     :arg list other-files: list other files to archive (default '')
     :arg bool archive-output-xml: Archive output xml file to server
         (default true)
+    :arg bool enable-cache: Enable cache for test results (default true)
 
-    Example:
+    Minimal Example:
 
-    .. literalinclude:: /../../tests/publishers/fixtures/robot001.yaml
+    .. literalinclude:: /../../tests/publishers/fixtures/robot-minimal.yaml
+       :language: yaml
+
+    Full Example:
+
+    .. literalinclude:: /../../tests/publishers/fixtures/robot-complete.yaml
        :language: yaml
     """
     parent = XML.SubElement(xml_parent, 'hudson.plugins.robot.RobotPublisher')
-    XML.SubElement(parent, 'outputPath').text = data['output-path']
-    XML.SubElement(parent, 'logFileLink').text = str(
-        data.get('log-file-link', ''))
-    XML.SubElement(parent, 'reportFileName').text = str(
-        data.get('report-html', 'report.html'))
-    XML.SubElement(parent, 'logFileName').text = str(
-        data.get('log-html', 'log.html'))
-    XML.SubElement(parent, 'outputFileName').text = str(
-        data.get('output-xml', 'output.xml'))
-    XML.SubElement(parent, 'passThreshold').text = str(
-        data.get('pass-threshold', 0.0))
-    XML.SubElement(parent, 'unstableThreshold').text = str(
-        data.get('unstable-threshold', 0.0))
-    XML.SubElement(parent, 'onlyCritical').text = str(
-        data.get('only-critical', True)).lower()
+    parent.set('plugin', 'robot')
+    mappings = [
+        ('output-path', 'outputPath', None),
+        ('log-file-link', 'logFileLink', ''),
+        ('report-html', 'reportFileName', 'report.html'),
+        ('log-html', 'logFileName', 'log.html'),
+        ('output-xml', 'outputFileName', 'output.xml'),
+        ('pass-threshold', 'passThreshold', '0.0'),
+        ('unstable-threshold', 'unstableThreshold', '0.0'),
+        ('only-critical', 'onlyCritical', True),
+        ('enable-cache', 'enableCache', True)
+    ]
+    helpers.convert_mapping_to_xml(parent, data, mappings, fail_required=True)
+
     other_files = XML.SubElement(parent, 'otherFiles')
-    for other_file in data['other-files']:
+    for other_file in data.get('other-files', []):
         XML.SubElement(other_files, 'string').text = str(other_file)
     XML.SubElement(parent, 'disableArchiveOutput').text = str(
         not data.get('archive-output-xml', True)).lower()
 
 
-def warnings(parser, xml_parent, data):
+def warnings(registry, xml_parent, data):
     """yaml: warnings
     Generate trend report for compiler warnings in the console log or
     in log files. Requires the Jenkins :jenkins-wiki:`Warnings Plugin
@@ -3263,7 +3749,7 @@ def warnings(parser, xml_parent, data):
 
         :workspace-file-scanners:
             * **file-pattern** (`str`) -- Fileset 'includes' setting that
-                specifies the files to scan for warnings
+                specifies the files to scan for warnings (required)
             * **scanner** (`str`) -- The parser to use to scan the files
                 provided in workspace-file-pattern (default '')
     :arg str files-to-include: Comma separated list of regular
@@ -3354,15 +3840,21 @@ def warnings(parser, xml_parent, data):
     :arg str default-encoding: Default encoding when parsing or showing files
         Leave empty to use default encoding of platform (default '')
 
-    Example:
+    Minimal Example:
 
-    .. literalinclude:: /../../tests/publishers/fixtures/warnings001.yaml
+    .. literalinclude:: /../../tests/publishers/fixtures/warnings-minimal.yaml
+       :language: yaml
+
+    Full Example:
+
+    .. literalinclude:: /../../tests/publishers/fixtures/warnings-complete.yaml
        :language: yaml
     """
 
     warnings = XML.SubElement(xml_parent,
                               'hudson.plugins.warnings.'
                               'WarningsPublisher')
+    warnings.set('plugin', 'warnings')
     console = XML.SubElement(warnings, 'consoleParsers')
     for parser in data.get('console-log-parsers', []):
         console_parser = XML.SubElement(console,
@@ -3374,34 +3866,36 @@ def warnings(parser, xml_parent, data):
         workspace_pattern = XML.SubElement(workspace,
                                            'hudson.plugins.warnings.'
                                            'ParserConfiguration')
-        XML.SubElement(workspace_pattern, 'pattern').text = \
-            wfs['file-pattern']
-        XML.SubElement(workspace_pattern, 'parserName').text = \
-            wfs['scanner']
-    warnings_to_include = data.get('files-to-include', '')
-    XML.SubElement(warnings, 'includePattern').text = warnings_to_include
-    warnings_to_ignore = data.get('files-to-ignore', '')
-    XML.SubElement(warnings, 'excludePattern').text = warnings_to_ignore
-    run_always = str(data.get('run-always', False)).lower()
-    XML.SubElement(warnings, 'canRunOnFailed').text = run_always
-    detect_modules = str(data.get('detect-modules', False)).lower()
-    XML.SubElement(warnings, 'shouldDetectModules').text = detect_modules
-    # Note the logic reversal (included here to match the GUI)
-    XML.SubElement(warnings, 'doNotResolveRelativePaths').text = \
-        str(not data.get('resolve-relative-paths', False)).lower()
-    health_threshold_high = str(data.get('health-threshold-high', ''))
-    XML.SubElement(warnings, 'healthy').text = health_threshold_high
-    health_threshold_low = str(data.get('health-threshold-low', ''))
-    XML.SubElement(warnings, 'unHealthy').text = health_threshold_low
+        workspace_pattern_mappings = [
+            ('file-pattern', 'pattern', None),
+            ('scanner', 'parserName', '')
+        ]
+        helpers.convert_mapping_to_xml(workspace_pattern,
+                                       wfs,
+                                       workspace_pattern_mappings,
+                                       fail_required=True)
     prioritiesDict = {'priority-high': 'high',
                       'high-and-normal': 'normal',
                       'all-priorities': 'low'}
-    priority = data.get('health-priorities', 'all-priorities')
-    if priority not in prioritiesDict:
-        raise JenkinsJobsException("Health-Priority entered is not valid must "
-                                   "be one of: %s" %
-                                   ",".join(prioritiesDict.keys()))
-    XML.SubElement(warnings, 'thresholdLimit').text = prioritiesDict[priority]
+    warnings_mappings = [
+        ('files-to-include', 'includePattern', ''),
+        ('files-to-ignore', 'excludePattern', ''),
+        ('plugin-name', 'pluginName', '[WARNINGS]'),
+        ('run-always', 'canRunOnFailed', False),
+        ('detect-modules', 'shouldDetectModules', False),
+        ('health-threshold-high', 'healthy', ''),
+        ('health-threshold-low', 'unHealthy', ''),
+        ('health-priorities',
+         'thresholdLimit',
+         'all-priorities',
+         prioritiesDict),
+        ('default-encoding', 'defaultEncoding', '')
+    ]
+    helpers.convert_mapping_to_xml(
+        warnings, data, warnings_mappings, fail_required=True)
+    # Note the logic reversal (included here to match the GUI)
+    XML.SubElement(warnings, 'doNotResolveRelativePaths').text = str(
+        not data.get('resolve-relative-paths', False)).lower()
     td = XML.SubElement(warnings, 'thresholds')
     for base in ["total", "new"]:
         thresholds = data.get("%s-thresholds" % base, {})
@@ -3425,41 +3919,56 @@ def warnings(parser, xml_parent, data):
             use_stable_builds).lower()
     else:
         XML.SubElement(warnings, 'dontComputeNew').text = 'true'
-        XML.SubElement(warnings, 'useStableBuildAsReference').text = 'false'
         XML.SubElement(warnings, 'useDeltaValues').text = 'false'
-    encoding = data.get('default-encoding', '')
-    XML.SubElement(warnings, 'defaultEncoding').text = encoding
+        XML.SubElement(warnings, 'usePreviousBuildAsReference').text = 'false'
+        XML.SubElement(warnings, 'useStableBuildAsReference').text = 'false'
 
 
-def sloccount(parser, xml_parent, data):
+def sloccount(registry, xml_parent, data):
     """yaml: sloccount
     Generates the trend report for SLOCCount
 
     Requires the Jenkins :jenkins-wiki:`SLOCCount Plugin <SLOCCount+Plugin>`.
 
     :arg str report-files: Setting that specifies the generated raw
-                           SLOCCount report files.
-                           Be sure not to include any non-report files into
-                           this pattern. The report files must have been
-                           generated by sloccount using the
-                           "--wide --details" options.
-                           (default: '\*\*/sloccount.sc')
+        SLOCCount report files. Be sure not to include any non-report files
+        into this pattern. The report files must have been generated by
+        sloccount using the "--wide --details" options.
+        (default '\*\*/sloccount.sc')
     :arg str charset: The character encoding to be used to read the SLOCCount
-                      result files. (default: 'UTF-8')
+        result files. (default 'UTF-8')
+    :arg int builds-in-graph: Maximal number of last successful builds, that
+        are displayed in the trend graphs. (default 0)
+    :arg bool comment-is-code: This option is considered only in the cloc
+        report parser and is ignored in the SLOCCount one. (default false)
+    :arg bool ignore-build-failure: Try to process the report files even if
+        the build is not successful. (default false)
 
-    Example:
+    Minimal Example:
 
-    .. literalinclude:: /../../tests/publishers/fixtures/sloccount001.yaml
+    .. literalinclude:: /../../tests/publishers/fixtures/sloccount-minimal.yaml
+       :language: yaml
+
+    Full Example:
+
+    .. literalinclude::
+       /../../tests/publishers/fixtures/sloccount-complete.yaml
        :language: yaml
     """
     top = XML.SubElement(xml_parent,
                          'hudson.plugins.sloccount.SloccountPublisher')
-    XML.SubElement(top, 'pattern').text = data.get('report-files',
-                                                   '**/sloccount.sc')
-    XML.SubElement(top, 'encoding').text = data.get('charset', 'UTF-8')
+    top.set('plugin', 'sloccount')
+    mappings = [
+        ('report-files', 'pattern', '**/sloccount.sc'),
+        ('charset', 'encoding', 'UTF-8'),
+        ('builds-in-graph', 'numBuildsInGraph', 0),
+        ('comment-is-code', 'commentIsCode', False),
+        ('ignore-build-failure', 'ignoreBuildFailure', False)
+    ]
+    helpers.convert_mapping_to_xml(top, data, mappings, fail_required=True)
 
 
-def ircbot(parser, xml_parent, data):
+def ircbot(registry, xml_parent, data):
     """yaml: ircbot
     ircbot enables Jenkins to send build notifications via IRC and lets you
     interact with Jenkins via an IRC bot.
@@ -3476,20 +3985,20 @@ def ircbot(parser, xml_parent, data):
             * **statechange-only** only on state change
     :arg bool notify-start: Whether to send notifications to channels when a
                            build starts
-                           (default: false)
+                           (default false)
     :arg bool notify-committers: Whether to send notifications to the users
                                 that are suspected of having broken this build
-                                (default: false)
+                                (default false)
     :arg bool notify-culprits: Also send notifications to 'culprits' from
                               previous unstable/failed builds
-                              (default: false)
+                              (default false)
     :arg bool notify-upstream: Whether to send notifications to upstream
                               committers if no committers were found for a
                               broken build
-                              (default: false)
+                              (default false)
     :arg bool notify-fixers: Whether to send notifications to the users that
                             have fixed a broken build
-                            (default: false)
+                            (default false)
     :arg string message-type: Channel Notification Message.
 
         :message-type values:
@@ -3499,7 +4008,7 @@ def ircbot(parser, xml_parent, data):
             * **summary-scm-fail** for summary, SCM changes, failures)
     :arg list channels: list channels definitions
                         If empty, it takes channel from Jenkins configuration.
-                        (default: empty)
+                        (default empty)
                         WARNING: the IRC plugin requires the channel to be
                         configured in the system wide configuration or the jobs
                         will fail to emit notifications to the channel
@@ -3507,7 +4016,7 @@ def ircbot(parser, xml_parent, data):
         :Channel: * **name** (`str`) Channel name
                   * **password** (`str`) Channel password (optional)
                   * **notify-only** (`bool`) Set to true if you want to
-                    disallow bot commands (default: false)
+                    disallow bot commands (default false)
     :arg string matrix-notifier: notify for matrix projects
                                  instant-messaging-plugin injects an additional
                                  field in the configuration form whenever the
@@ -3576,44 +4085,38 @@ def ircbot(parser, xml_parent, data):
     XML.SubElement(top, 'matrixMultiplier').text = matrix_dict.get(matrix)
 
 
-def plot(parser, xml_parent, data):
+def plot(registry, xml_parent, data):
     """yaml: plot
     Plot provides generic plotting (or graphing).
 
     Requires the Jenkins :jenkins-wiki:`Plot Plugin <Plot+Plugin>`.
 
-    :arg str title: title for the graph (default: '')
-    :arg str yaxis: title of Y axis (default: '')
+    :arg str title: title for the graph (default '')
+    :arg str yaxis: title of Y axis (default '')
+    :arg int width: the width of the plot in pixels (default 750)
+    :arg int height: the height of the plot in pixels (default 450)
     :arg str group: name of the group to which the plot belongs (required)
     :arg int num-builds: number of builds to plot across
-                         (default: plot all builds)
+        (default plot all builds)
     :arg str style:  Specifies the graph style of the plot
-                     Can be: area, bar, bar3d, line, line3d, stackedArea,
-                     stackedbar, stackedbar3d, waterfall
-                     (default: 'line')
-    :arg bool use-description: When false, the X-axis labels are formed
-                               using build numbers and dates, and the
-                               corresponding tooltips contain the build
-                               descriptions. When enabled, the contents of
-                               the labels and tooltips are swapped, with the
-                               descriptions used as X-axis labels and the
-                               build number and date used for tooltips.
-                               (default: False)
+        Can be: area, bar, bar3d, line, line3d, stackedArea, stackedbar,
+        stackedbar3d, waterfall (default 'line')
+    :arg bool use-description: When false, the X-axis labels are formed using
+        build numbers and dates, and the corresponding tooltips contain the
+        build descriptions. When enabled, the contents of the labels and
+        tooltips are swapped, with the descriptions used as X-axis labels and
+        the build number and date used for tooltips. (default false)
     :arg bool exclude-zero-yaxis: When false, Y-axis contains the value zero
-                                  even if it is not included in the data
-                                  series. When true, the value zero is not
-                                  automatically included. (default: False)
+        even if it is not included in the data series. When true, the value
+        zero is not automatically included. (default false)
     :arg bool logarithmic-yaxis: When true, the Y-axis will use a logarithmic
-                                 scale. By default, the Y-axis uses a linear
-                                 scale. (default: False)
+        scale. By default, the Y-axis uses a linear scale. (default false)
     :arg bool keep-records: When true, show all builds up to 'Number of
-                            builds to include'. (default: false)
+        builds to include'. (default false)
     :arg str csv-file-name: Use for choosing the file name in which the data
-                            will be persisted. If none specified and random
-                            name is generated as done in the Jenkins Plot
-                            plugin.
-                            (default: random generated .csv filename, same
-                            behaviour as the Jenkins Plot plugin)
+        will be persisted. If none specified and random name is generated as
+        done in the Jenkins Plot plugin. (default random generated .csv
+        filename, same behaviour as the Jenkins Plot plugin)
     :arg list series: list data series definitions
 
       :Serie: * **file** (`str`) : files to include
@@ -3628,19 +4131,19 @@ def plot(parser, xml_parent, data):
 
               * **exclude** (`str`) : exclude pattern for CSV file.
               * **url** (`str`) : for 'csv' and 'xml' file types
-                used when you click on a point (default: empty)
+                used when you click on a point (default empty)
               * **display-table** (`bool`) : for 'csv' file type
-                if true, original CSV will be shown above plot (default: False)
+                if true, original CSV will be shown above plot (default false)
               * **label** (`str`) : used by 'properties' file type
                 Specifies the legend label for this data series.
-                (default: empty)
+                (default empty)
               * **format** (`str`) : Type of file where we get datas.
                 Can be: properties, csv, xml
               * **xpath-type** (`str`) : The result type of the expression must
                 be supplied due to limitations in the java.xml.xpath parsing.
                 The result can be: node, nodeset, boolean, string, or number.
                 Strings and numbers will be converted to double. Boolean will
-                be converted to 1 for true, and 0 for false. (default: 'node')
+                be converted to 1 for true, and 0 for false. (default 'node')
               * **xpath** (`str`) : used by 'xml' file type
                 Xpath which selects the values that should be plotted.
 
@@ -3669,6 +4172,8 @@ def plot(parser, xml_parent, data):
         plugin = XML.SubElement(plots, 'hudson.plugins.plot.Plot')
         XML.SubElement(plugin, 'title').text = plot.get('title', '')
         XML.SubElement(plugin, 'yaxis').text = plot['yaxis']
+        XML.SubElement(plugin, 'width').text = str(plot.get('width', '750'))
+        XML.SubElement(plugin, 'height').text = str(plot.get('height', '450'))
         XML.SubElement(plugin, 'csvFileName').text = \
             plot.get('csv-file-name', '%s.csv' % random.randrange(2 << 32))
         topseries = XML.SubElement(plugin, 'series')
@@ -3702,7 +4207,7 @@ def plot(parser, xml_parent, data):
                             exclude_string
                 XML.SubElement(subserie, 'url').text = serie.get('url', '')
                 XML.SubElement(subserie, 'displayTableFlag').text = \
-                    str(plot.get('display-table', False)).lower()
+                    str(serie.get('display-table', False)).lower()
             if format_data == 'xml':
                 XML.SubElement(subserie, 'url').text = serie.get('url', '')
                 XML.SubElement(subserie, 'xpathString').text = \
@@ -3723,7 +4228,8 @@ def plot(parser, xml_parent, data):
             ('logarithmic-yaxis', 'logarithmic', False),
             ('keep-records', 'keepRecords', False),
             ('num-builds', 'numBuilds', '')]
-        convert_mapping_to_xml(plugin, plot, mappings, fail_required=True)
+        helpers.convert_mapping_to_xml(
+            plugin, plot, mappings, fail_required=True)
 
         style_list = ['area', 'bar', 'bar3d', 'line', 'line3d', 'stackedArea',
                       'stackedbar', 'stackedbar3d', 'waterfall']
@@ -3734,7 +4240,7 @@ def plot(parser, xml_parent, data):
         XML.SubElement(plugin, 'style').text = style
 
 
-def git(parser, xml_parent, data):
+def git(registry, xml_parent, data):
     """yaml: git
     This plugin will configure the Jenkins Git plugin to
     push merge results, tags, and/or branches to
@@ -3743,38 +4249,38 @@ def git(parser, xml_parent, data):
     Requires the Jenkins :jenkins-wiki:`Git Plugin <Git+Plugin>`.
 
     :arg bool push-merge: push merges back to the origin specified in the
-                          pre-build merge options (Default: False)
+                          pre-build merge options (default false)
     :arg bool push-only-if-success: Only push to remotes if the build succeeds
                                     - otherwise, nothing will be pushed.
-                                    (Default: True)
-    :arg bool force-push: Add force option to git push (Default: False)
+                                    (default true)
+    :arg bool force-push: Add force option to git push (default false)
     :arg list tags: tags to push at the completion of the build
 
         :tag: * **remote** (`str`) remote repo name to push to
-                (Default: 'origin')
+                (default 'origin')
               * **name** (`str`) name of tag to push
               * **message** (`str`) message content of the tag
               * **create-tag** (`bool`) whether or not to create the tag
                 after the build, if this is False then the tag needs to
-                exist locally (Default: False)
+                exist locally (default false)
               * **update-tag** (`bool`) whether to overwrite a remote tag
-                or not (Default: False)
+                or not (default false)
 
     :arg list branches: branches to push at the completion of the build
 
         :branch: * **remote** (`str`) remote repo name to push to
-                   (Default: 'origin')
+                   (default 'origin')
                  * **name** (`str`) name of remote branch to push to
 
     :arg list notes: notes to push at the completion of the build
 
         :note: * **remote** (`str`) remote repo name to push to
-                 (Default: 'origin')
+                 (default 'origin')
                * **message** (`str`) content of the note
                * **namespace** (`str`) namespace of the note
-                 (Default: master)
+                 (default master)
                * **replace-note** (`bool`) whether to overwrite a note or not
-                 (Default: False)
+                 (default false)
 
 
     Example:
@@ -3800,19 +4306,9 @@ def git(parser, xml_parent, data):
                      ('namespace', 'noteNamespace', 'master'),
                      ('replace-note', 'noteReplace', False)]
 
-    def handle_entity_children(entity, entity_xml, child_mapping):
-        for prop in child_mapping:
-            opt, xmlopt, default_val = prop[:3]
-            val = entity.get(opt, default_val)
-            if val is None:
-                raise JenkinsJobsException('Required option missing: %s' % opt)
-            if type(val) == bool:
-                val = str(val).lower()
-            XML.SubElement(entity_xml, xmlopt).text = val
-
     top = XML.SubElement(xml_parent, 'hudson.plugins.git.GitPublisher')
     XML.SubElement(top, 'configVersion').text = '2'
-    handle_entity_children(data, top, mappings)
+    helpers.convert_mapping_to_xml(top, data, mappings, fail_required=True)
 
     tags = data.get('tags', [])
     if tags:
@@ -3821,7 +4317,8 @@ def git(parser, xml_parent, data):
             xml_tag = XML.SubElement(
                 xml_tags,
                 'hudson.plugins.git.GitPublisher_-TagToPush')
-            handle_entity_children(tag['tag'], xml_tag, tag_mappings)
+            helpers.convert_mapping_to_xml(
+                xml_tag, tag['tag'], tag_mappings, fail_required=True)
 
     branches = data.get('branches', [])
     if branches:
@@ -3830,8 +4327,10 @@ def git(parser, xml_parent, data):
             xml_branch = XML.SubElement(
                 xml_branches,
                 'hudson.plugins.git.GitPublisher_-BranchToPush')
-            handle_entity_children(branch['branch'], xml_branch,
-                                   branch_mappings)
+            helpers.convert_mapping_to_xml(xml_branch,
+                                           branch['branch'],
+                                           branch_mappings,
+                                           fail_required=True)
 
     notes = data.get('notes', [])
     if notes:
@@ -3840,10 +4339,11 @@ def git(parser, xml_parent, data):
             xml_note = XML.SubElement(
                 xml_notes,
                 'hudson.plugins.git.GitPublisher_-NoteToPush')
-            handle_entity_children(note['note'], xml_note, note_mappings)
+            helpers.convert_mapping_to_xml(
+                xml_note, note['note'], note_mappings, fail_required=True)
 
 
-def github_notifier(parser, xml_parent, data):
+def github_notifier(registry, xml_parent, data):
     """yaml: github-notifier
     Set build status on Github commit.
     Requires the Jenkins :jenkins-wiki:`Github Plugin <GitHub+Plugin>`.
@@ -3857,7 +4357,22 @@ def github_notifier(parser, xml_parent, data):
                    'com.cloudbees.jenkins.GitHubCommitNotifier')
 
 
-def zulip(parser, xml_parent, data):
+def gitlab_notifier(registry, xml_parent, data):
+    """yaml: gitlab-notifier
+    Set build status on GitLab commit.
+    Requires the Jenkins :jenkins-wiki:`GitLab Plugin <GitLab+Plugin>`.
+
+    Example:
+
+    .. literalinclude:: /../../tests/publishers/fixtures/gitlab-notifier.yaml
+       :language: yaml
+    """
+    XML.SubElement(
+        xml_parent,
+        'com.dabsquared.gitlabjenkins.publisher.GitLabCommitStatusPublisher')
+
+
+def zulip(registry, xml_parent, data):
     """yaml: zulip
     Set build status on zulip.
     Requires the Jenkins :jenkins-wiki:`Humbug Plugin <Humbug+Plugin>`.
@@ -3871,7 +4386,7 @@ def zulip(parser, xml_parent, data):
                    'hudson.plugins.humbug.HumbugNotifier')
 
 
-def build_publisher(parser, xml_parent, data):
+def build_publisher(registry, xml_parent, data):
     """yaml: build-publisher
     This plugin allows records from one Jenkins to be published
     on another Jenkins.
@@ -3879,8 +4394,8 @@ def build_publisher(parser, xml_parent, data):
     Requires the Jenkins :jenkins-wiki:`Build Publisher Plugin
     <Build+Publisher+Plugin>`.
 
-    :arg bool publish-unstable-builds: publish unstable builds (default: true)
-    :arg bool publish-failed-builds: publish failed builds (default: true)
+    :arg bool publish-unstable-builds: publish unstable builds (default true)
+    :arg bool publish-failed-builds: publish failed builds (default true)
     :arg int days-to-keep: days to keep when publishing results (optional)
     :arg int num-to-keep: number of jobs to keep in the published results
       (optional)
@@ -3913,7 +4428,7 @@ def build_publisher(parser, xml_parent, data):
         XML.SubElement(logrotator, 'artifactNumToKeep').text = "-1"
 
 
-def stash(parser, xml_parent, data):
+def stash(registry, xml_parent, data):
     """yaml: stash
     This plugin will configure the Jenkins Stash Notifier plugin to
     notify Atlassian Stash after job completes.
@@ -3921,14 +4436,14 @@ def stash(parser, xml_parent, data):
     Requires the Jenkins :jenkins-wiki:`StashNotifier Plugin
     <StashNotifier+Plugin>`.
 
-    :arg string url: Base url of Stash Server (Default: "")
-    :arg string username: Username of Stash Server (Default: "")
-    :arg string password: Password of Stash Server (Default: "")
+    :arg string url: Base url of Stash Server (default "")
+    :arg string username: Username of Stash Server (default "")
+    :arg string password: Password of Stash Server (default "")
     :arg string credentials-id: Credentials of Stash Server (optional)
-    :arg bool   ignore-ssl: Ignore unverified SSL certificate (Default: False)
-    :arg string commit-sha1: Commit SHA1 to notify (Default: "")
+    :arg bool   ignore-ssl: Ignore unverified SSL certificate (default false)
+    :arg string commit-sha1: Commit SHA1 to notify (default "")
     :arg bool   include-build-number: Include build number in key
-                (Default: False)
+                (default false)
 
     Example:
 
@@ -3944,11 +4459,11 @@ def stash(parser, xml_parent, data):
             data.get('credentials-id'))
     else:
         XML.SubElement(top, 'stashUserName'
-                       ).text = get_value_from_yaml_or_config_file(
-                           'username', 'stash', data, parser)
+                       ).text = helpers.get_value_from_yaml_or_config_file(
+                           'username', 'stash', data, registry.jjb_config)
         XML.SubElement(top, 'stashUserPassword'
-                       ).text = get_value_from_yaml_or_config_file(
-                           'password', 'stash', data, parser)
+                       ).text = helpers.get_value_from_yaml_or_config_file(
+                           'password', 'stash', data, registry.jjb_config)
 
     XML.SubElement(top, 'ignoreUnverifiedSSLPeer').text = str(
         data.get('ignore-ssl', False)).lower()
@@ -3957,7 +4472,7 @@ def stash(parser, xml_parent, data):
         data.get('include-build-number', False)).lower()
 
 
-def dependency_check(parser, xml_parent, data):
+def dependency_check(registry, xml_parent, data):
     """yaml: dependency-check
     Dependency-Check is an open source utility that identifies project
     dependencies and checks if there are any known, publicly disclosed,
@@ -4003,7 +4518,7 @@ def dependency_check(parser, xml_parent, data):
     :arg bool dont-compute-new: If set to false, computes new warnings based on
       the reference build (default true)
     :arg bool use-previous-build-as-reference: determines whether to always
-        use the previous build as the reference build (Default false)
+        use the previous build as the reference build (default false)
     :arg bool use-stable-build-as-reference: The number of new warnings will be
       calculated based on the last stable build, allowing reverts of unstable
       builds where the number of warnings was decreased. (default false)
@@ -4024,10 +4539,11 @@ def dependency_check(parser, xml_parent, data):
         'org.jenkinsci.plugins.DependencyCheck.DependencyCheckPublisher')
 
     # trends
-    build_trends_publisher('[DEPENDENCYCHECK] ', dependency_check, data)
+    helpers.build_trends_publisher(
+        '[DEPENDENCYCHECK] ', dependency_check, data)
 
 
-def description_setter(parser, xml_parent, data):
+def description_setter(registry, xml_parent, data):
     """yaml: description-setter
     This plugin sets the description for each build,
     based upon a RegEx test of the build log file.
@@ -4042,7 +4558,7 @@ def description_setter(parser, xml_parent, data):
     :arg str description-for-failed: The description to set on
         the failed builds (optional)
     :arg bool set-for-matrix: Also set the description on
-        a multi-configuration build (Default False)
+        a multi-configuration build (default false)
 
     Example:
 
@@ -4067,7 +4583,7 @@ def description_setter(parser, xml_parent, data):
     XML.SubElement(descriptionsetter, 'setForMatrix').text = for_matrix
 
 
-def doxygen(parser, xml_parent, data):
+def doxygen(registry, xml_parent, data):
     """yaml: doxygen
     This plugin parses the Doxygen descriptor (Doxyfile) and provides a link to
     the generated Doxygen documentation.
@@ -4077,8 +4593,8 @@ def doxygen(parser, xml_parent, data):
     :arg str doxyfile: The doxyfile path
     :arg str slave: The node or label to pull the doxygen HTML files from
     :arg bool keep-all: Retain doxygen generation for each successful build
-        (default: false)
-    :arg str folder: Folder where you run doxygen (default: '')
+        (default false)
+    :arg str folder: Folder where you run doxygen (default '')
 
     Example:
 
@@ -4097,12 +4613,12 @@ def doxygen(parser, xml_parent, data):
         if 'keep-all' in data:
             XML.SubElement(p, 'keepAll').text = str(
                 data.get('keep-all', False)).lower()
-            logger.warn("The value of 'keepall' will be ignored "
-                        "in preference to 'keep-all'.")
+            logger.warning("The value of 'keepall' will be ignored "
+                           "in preference to 'keep-all'.")
         else:
             XML.SubElement(p, 'keepAll').text = str(
                 data.get('keepall', False)).lower()
-            logger.warn("'keepall' is deprecated please use 'keep-all'")
+            logger.warning("'keepall' is deprecated please use 'keep-all'")
     else:
         XML.SubElement(p, 'keepAll').text = str(
             data.get('keep-all', False)).lower()
@@ -4110,7 +4626,7 @@ def doxygen(parser, xml_parent, data):
         data.get('folder', ''))
 
 
-def sitemonitor(parser, xml_parent, data):
+def sitemonitor(registry, xml_parent, data):
     """yaml: sitemonitor
     This plugin checks the availability of an url.
 
@@ -4133,36 +4649,69 @@ def sitemonitor(parser, xml_parent, data):
             XML.SubElement(site, 'mUrl').text = siteurl['url']
 
 
-def testng(parser, xml_parent, data):
+def testng(registry, xml_parent, data):
     """yaml: testng
     This plugin publishes TestNG test reports.
 
     Requires the Jenkins :jenkins-wiki:`TestNG Results Plugin <testng-plugin>`.
 
     :arg str pattern: filename pattern to locate the TestNG XML report files
+        (required)
     :arg bool escape-test-description: escapes the description string
       associated with the test method while displaying test method details
-      (Default True)
+      (default true)
     :arg bool escape-exception-msg: escapes the test method's exception
-      messages. (Default True)
+      messages. (default true)
+    :arg bool fail-on-failed-test-config: Allows for a distinction between
+        failing tests and failing configuration methods (>=1.10) (default
+        false)
+    :arg bool show-failed-builds: include results from failed builds in the
+        trend graph (>=1.6) (default false)
+    :arg int unstable-skips: Build is marked UNSTABLE if the number/percentage
+        of skipped tests exceeds the specified threshold (>=1.11) (default 100)
+    :arg int unstable-fails: Build is marked UNSTABLE if the number/percentage
+        of failed tests exceeds the specified threshold (>=1.11) (default 0)
+    :arg int failed-skips: Build is marked FAILURE if the number/percentage of
+        skipped tests exceeds the specified threshold (>=1.11) (default 100)
+    :arg int failed-fails: Build is marked FAILURE if the number/percentage of
+        failed tests exceeds the specified threshold (>=1.11) (default 100)
+    :arg str threshold-mode: Interpret threshold as number of tests or
+        percentage of tests (>=1.11) (default percentage)
 
-    Example:
+    Full Example:
 
-    .. literalinclude:: /../../tests/publishers/fixtures/testng001.yaml
+    .. literalinclude:: /../../tests/publishers/fixtures/testng-full.yaml
+       :language: yaml
+
+    Minimal Example:
+
+    .. literalinclude:: /../../tests/publishers/fixtures/testng-minimal.yaml
        :language: yaml
     """
 
     reporter = XML.SubElement(xml_parent, 'hudson.plugins.testng.Publisher')
-    if not data['pattern']:
-        raise JenkinsJobsException("A filename pattern must be specified.")
-    XML.SubElement(reporter, 'reportFilenamePattern').text = data['pattern']
-    XML.SubElement(reporter, 'escapeTestDescp').text = str(data.get(
-        'escape-test-description', True))
-    XML.SubElement(reporter, 'escapeExceptionMsg').text = str(data.get(
-        'escape-exception-msg', True))
+    reporter.set('plugin', 'testng-plugin')
+    threshold_modes = {
+        'number': 1,
+        'percentage': 2}
+
+    mappings = [
+        ('pattern', 'reportFilenamePattern', None),
+        ('escape-test-description', 'escapeTestDescp', True),
+        ('escape-exception-msg', 'escapeExceptionMsg', True),
+        ('fail-on-failed-test-config', 'failureOnFailedTestConfig', False),
+        ('show-failed-builds', 'showFailedBuilds', False),
+        ('unstable-skips', 'unstableSkips', 100),
+        ('unstable-fails', 'unstableFails', 0),
+        ('failed-skips', 'failedSkips', 100),
+        ('failed-fails', 'failedFails', 100),
+        ('threshold-mode', 'thresholdMode', 'percentage', threshold_modes)
+    ]
+    helpers.convert_mapping_to_xml(
+        reporter, data, mappings, fail_required=True)
 
 
-def artifact_deployer(parser, xml_parent, data):
+def artifact_deployer(registry, xml_parent, data):
     """yaml: artifact-deployer
     This plugin makes it possible to copy artifacts to remote locations.
 
@@ -4176,17 +4725,17 @@ def artifact_deployer(parser, xml_parent, data):
             * **excludes** (`str`) - the mask to exclude files
             * **remote** (`str`) - a remote output directory
             * **flatten** (`bool`) - ignore the source directory structure
-              (Default: False)
+              (default false)
             * **delete-remote** (`bool`) - clean-up remote directory
-              before deployment (Default: False)
+              before deployment (default false)
             * **delete-remote-artifacts** (`bool`) - delete remote artifacts
-              when the build is deleted (Default: False)
+              when the build is deleted (default false)
             * **fail-no-files** (`bool`) - fail build if there are no files
-              (Default: False)
+              (default false)
             * **groovy-script** (`str`) - execute a Groovy script
               before a build is deleted
 
-    :arg bool deploy-if-fail: Deploy if the build is failed (Default: False)
+    :arg bool deploy-if-fail: Deploy if the build is failed (default false)
 
     Example:
 
@@ -4228,7 +4777,7 @@ def artifact_deployer(parser, xml_parent, data):
     XML.SubElement(deployer, 'deployEvenBuildFail').text = deploy_if_fail
 
 
-def s3(parser, xml_parent, data):
+def s3(registry, xml_parent, data):
     """yaml: s3
     Upload build artifacts to Amazon S3.
 
@@ -4244,17 +4793,17 @@ def s3(parser, xml_parent, data):
         * **bucket-region** (`str`) - S3 bucket region (capitalized with
           underscores)
         * **upload-on-failure** (`bool`) - Upload files even if the build
-          failed (Default: False)
+          failed (default false)
         * **upload-from-slave** (`bool`) - Perform the upload directly from
-          the Jenkins slave rather than the master node. (Default: False)
+          the Jenkins slave rather than the master node. (default false)
         * **managed-artifacts** (`bool`) - Let Jenkins fully manage the
           published artifacts, similar to when artifacts are published to
-          the Jenkins master. (Default: False)
+          the Jenkins master. (default false)
         * **s3-encryption** (`bool`) - Use S3 AES-256 server side encryption
-          support. (Default: False)
+          support. (default false)
         * **flatten** (`bool`) - Ignore the directory structure of the
           artifacts in the source project and copy all matching artifacts
-          directly into the specified bucket. (Default: False)
+          directly into the specified bucket. (default false)
     :arg list metadata-tags:
       :metadata-tags:
         * **key** Metadata key for files from this build. It will be
@@ -4307,7 +4856,7 @@ def s3(parser, xml_parent, data):
         XML.SubElement(pair, 'value').text = tag.get('value')
 
 
-def ruby_metrics(parser, xml_parent, data):
+def ruby_metrics(registry, xml_parent, data):
     """yaml: ruby-metrics
     Rcov plugin parses rcov html report files and
     shows it in Jenkins with a trend graph.
@@ -4355,7 +4904,7 @@ def ruby_metrics(parser, xml_parent, data):
         raise JenkinsJobsException('Coverage metric targets must be set')
 
 
-def fitnesse(parser, xml_parent, data):
+def fitnesse(registry, xml_parent, data):
     """yaml: fitnesse
     Publish Fitnesse test results
 
@@ -4375,7 +4924,7 @@ def fitnesse(parser, xml_parent, data):
     XML.SubElement(fitnesse, 'fitnessePathToXmlResultsIn').text = results
 
 
-def valgrind(parser, xml_parent, data):
+def valgrind(registry, xml_parent, data):
     """yaml: valgrind
     This plugin publishes Valgrind Memcheck XML results.
 
@@ -4440,7 +4989,7 @@ def valgrind(parser, xml_parent, data):
         data.get('publish-if-failed', False)).lower()
 
 
-def pmd(parser, xml_parent, data):
+def pmd(registry, xml_parent, data):
     """yaml: pmd
     Publish trend reports with PMD.
     Requires the Jenkins :jenkins-wiki:`PMD Plugin <PMD+Plugin>`.
@@ -4484,7 +5033,7 @@ def pmd(parser, xml_parent, data):
     :arg bool dont-compute-new: If set to false, computes new warnings based on
       the reference build (default true)
     :arg bool use-previous-build-as-reference: determines whether to always
-        use the previous build as the reference build (Default false)
+        use the previous build as the reference build (default false)
     :arg bool use-stable-build-as-reference: The number of new warnings will be
       calculated based on the last stable build, allowing reverts of unstable
       builds where the number of warnings was decreased. (default false)
@@ -4506,10 +5055,10 @@ def pmd(parser, xml_parent, data):
 
     xml_element = XML.SubElement(xml_parent, 'hudson.plugins.pmd.PmdPublisher')
 
-    build_trends_publisher('[PMD] ', xml_element, data)
+    helpers.build_trends_publisher('[PMD] ', xml_element, data)
 
 
-def scan_build(parser, xml_parent, data):
+def scan_build(registry, xml_parent, data):
     """yaml: scan-build
     Publishes results from the Clang scan-build static analyzer.
 
@@ -4520,46 +5069,52 @@ def scan_build(parser, xml_parent, data):
     <Clang+Scan-Build+Plugin>`.
 
     :arg bool mark-unstable: Mark build as unstable if the number of bugs
-        exceeds a threshold (default: false)
-    :arg int threshold: Threshold for marking builds as unstable (default: 0)
+        exceeds a threshold (default false)
+    :arg int threshold: Threshold for marking builds as unstable (default 0)
     :arg string exclude-paths: Comma separated paths to exclude from reports
-        (default: '')
+        (>=1.5) (default '')
+    :arg string report-folder: Folder where generated reports are located
+        (>=1.7) (default 'clangScanBuildReports')
 
-    Example:
+    Full Example:
 
-    .. literalinclude:: /../../tests/publishers/fixtures/scan-build001.yaml
+    .. literalinclude:: /../../tests/publishers/fixtures/scan-build-full.yaml
+       :language: yaml
+
+    Minimal Example:
+
+    .. literalinclude::
+       /../../tests/publishers/fixtures/scan-build-minimal.yaml
        :language: yaml
     """
-    threshold = str(data.get('threshold', 0))
-    if not threshold.isdigit():
-        raise JenkinsJobsException("Invalid value '%s' for threshold. "
-                                   "Numeric value expected." % threshold)
-
     p = XML.SubElement(
         xml_parent,
         'jenkins.plugins.clangscanbuild.publisher.ClangScanBuildPublisher')
+    p.set('plugin', 'clang-scanbuild')
 
-    XML.SubElement(p, 'markBuildUnstableWhenThresholdIsExceeded').text = \
-        str(data.get('mark-unstable', False)).lower()
-    XML.SubElement(p, 'bugThreshold').text = threshold
-    XML.SubElement(p, 'clangexcludedpaths').text = str(
-        data.get('exclude-paths', ''))
+    mappings = [
+        ('mark-unstable', 'markBuildUnstableWhenThresholdIsExceeded', False),
+        ('threshold', 'bugThreshold', 0),
+        ('exclude-paths', 'clangexcludedpaths', ''),
+        ('report-folder', 'reportFolderName', 'clangScanBuildReports'),
+    ]
+    helpers.convert_mapping_to_xml(p, data, mappings, fail_required=True)
 
 
-def dry(parser, xml_parent, data):
+def dry(registry, xml_parent, data):
     """yaml: dry
     Publish trend reports with DRY.
     Requires the Jenkins :jenkins-wiki:`DRY Plugin <DRY+Plugin>`.
 
     The DRY component accepts a dictionary with the following values:
 
-    :arg str pattern: Report filename pattern (optional)
+    :arg str pattern: Report filename pattern (default '')
     :arg bool can-run-on-failed: Also runs for failed builds, instead of just
       stable or unstable builds (default false)
     :arg bool should-detect-modules: Determines if Ant or Maven modules should
       be detected for all files that contain warnings (default false)
-    :arg int healthy: Sunny threshold (optional)
-    :arg int unhealthy: Stormy threshold (optional)
+    :arg int healthy: Sunny threshold (default '')
+    :arg int unhealthy: Stormy threshold (default '')
     :arg str health-threshold: Threshold priority for health status
       ('low', 'normal' or 'high', defaulted to 'low')
     :arg int high-threshold: Minimum number of duplicated lines for high
@@ -4567,7 +5122,7 @@ def dry(parser, xml_parent, data):
     :arg int normal-threshold: Minimum number of duplicated lines for normal
       priority warnings. (default 25)
     :arg dict thresholds: Mark build as failed or unstable if the number of
-      errors exceeds a threshold. (optional)
+      errors exceeds a threshold. (default '')
 
         :thresholds:
             * **unstable** (`dict`)
@@ -4594,14 +5149,13 @@ def dry(parser, xml_parent, data):
     :arg bool dont-compute-new: If set to false, computes new warnings based on
       the reference build (default true)
     :arg bool use-previous-build-as-reference: determines whether to always
-        use the previous build as the reference build (Default false)
+        use the previous build as the reference build (default false)
     :arg bool use-stable-build-as-reference: The number of new warnings will be
       calculated based on the last stable build, allowing reverts of unstable
       builds where the number of warnings was decreased. (default false)
     :arg bool use-delta-values: If set then the number of new warnings is
       calculated by subtracting the total number of warnings of the current
-      build from the reference build.
-      (default false)
+      build from the reference build. (default false)
 
     Example:
 
@@ -4616,21 +5170,17 @@ def dry(parser, xml_parent, data):
 
     xml_element = XML.SubElement(xml_parent, 'hudson.plugins.dry.DryPublisher')
 
-    build_trends_publisher('[DRY] ', xml_element, data)
+    helpers.build_trends_publisher('[DRY] ', xml_element, data)
 
     # Add specific settings for this trends publisher
     settings = [
         ('high-threshold', 'highThreshold', 50),
         ('normal-threshold', 'normalThreshold', 25)]
-
-    for key, tag_name, default in settings:
-        xml_config = XML.SubElement(xml_element, tag_name)
-        config_value = data.get(key, default)
-
-        xml_config.text = str(config_value)
+    helpers.convert_mapping_to_xml(
+        xml_element, data, settings, fail_required=True)
 
 
-def shining_panda(parser, xml_parent, data):
+def shining_panda(registry, xml_parent, data):
     """yaml: shining-panda
     Publish coverage.py results. Requires the Jenkins
     :jenkins-wiki:`ShiningPanda Plugin <ShiningPanda+Plugin>`.
@@ -4651,7 +5201,7 @@ def shining_panda(parser, xml_parent, data):
             data['html-reports-directory'])
 
 
-def downstream_ext(parser, xml_parent, data):
+def downstream_ext(registry, xml_parent, data):
     """yaml: downstream-ext
     Trigger multiple downstream jobs when a job is completed and
     condition is met.
@@ -4662,14 +5212,14 @@ def downstream_ext(parser, xml_parent, data):
     :arg list projects: Projects to build (required)
     :arg string condition: comparison condition used for the criteria.
       One of 'equal-or-over', 'equal-or-under', 'equal'
-      (default: 'equal-or-over')
+      (default 'equal-or-over')
     :arg string criteria: Trigger downstream job if build results meets
       condition. One of 'success', 'unstable', 'failure' or
-      'aborted' (default: 'success')
+      'aborted' (default 'success')
     :arg bool only-on-scm-change: Trigger only if downstream project
-      has SCM changes (default: false)
+      has SCM changes (default false)
     :arg bool only-on-local-scm-change: Trigger only if current project
-      has SCM changes (default: false)
+      has SCM changes (default false)
 
     Example:
 
@@ -4721,7 +5271,7 @@ def downstream_ext(parser, xml_parent, data):
         data.get('only-on-local-scm-change', False)).lower()
 
 
-def rundeck(parser, xml_parent, data):
+def rundeck(registry, xml_parent, data):
     """yaml: rundeck
     Trigger a rundeck job when the build is complete.
 
@@ -4761,23 +5311,24 @@ def rundeck(parser, xml_parent, data):
         xml_parent,
         'org.jenkinsci.plugins.rundeck.RundeckNotifier')
 
-    XML.SubElement(p, 'jobId').text = str(data.get('job-id'))
-    XML.SubElement(p, 'options').text = str(data.get('options', ''))
-    XML.SubElement(p, 'nodeFilters').text = str(data.get('node-filters', ''))
-    XML.SubElement(p, 'tag').text = str(data.get('tag', ''))
-    XML.SubElement(p, 'shouldWaitForRundeckJob').text = str(
-        data.get('wait-for-rundeck', False)).lower()
-    XML.SubElement(p, 'shouldFailTheBuild').text = str(
-        data.get('fail-the-build', False)).lower()
+    mappings = [
+        ('job-id', 'jobId', None),
+        ('options', 'options', ''),
+        ('node-filters', 'nodeFilters', ''),
+        ('tag', 'tag', ''),
+        ('wait-for-rundeck', 'shouldWaitForRundeckJob', False),
+        ('fail-the-build', 'shouldFailTheBuild', False),
+    ]
+    helpers.convert_mapping_to_xml(p, data, mappings, fail_required=True)
 
 
-def create_publishers(parser, action):
+def create_publishers(registry, action):
     dummy_parent = XML.Element("dummy")
-    parser.registry.dispatch('publisher', parser, dummy_parent, action)
+    registry.dispatch('publisher', dummy_parent, action)
     return list(dummy_parent)
 
 
-def conditional_publisher(parser, xml_parent, data):
+def conditional_publisher(registry, xml_parent, data):
     """yaml: conditional-publisher
     Conditionally execute some post-build steps. Requires the Jenkins
     :jenkins-wiki:`Flexible Publish Plugin <Flexible+Publish+Plugin>`.
@@ -4932,7 +5483,7 @@ def conditional_publisher(parser, xml_parent, data):
                                        'value.' % kind)
 
     def publish_action(parent, action):
-        for edited_node in create_publishers(parser, action):
+        for edited_node in create_publishers(registry, action):
             if not use_publisher_list:
                 edited_node.set('class', edited_node.tag)
                 edited_node.tag = 'publisher'
@@ -4977,7 +5528,7 @@ def conditional_publisher(parser, xml_parent, data):
             action_parent = cond_publisher
 
             plugin_info = \
-                parser.registry.get_plugin_info("Flexible Publish Plugin")
+                registry.get_plugin_info("Flexible Publish Plugin")
             version = pkg_resources.parse_version(plugin_info.get('version',
                                                                   '0'))
             # XML tag changed from publisher to publisherList in v0.13
@@ -4999,15 +5550,15 @@ def conditional_publisher(parser, xml_parent, data):
             raise JenkinsJobsException('action must be set for each condition')
 
 
-def scoverage(parser, xml_parent, data):
+def scoverage(registry, xml_parent, data):
     """yaml: scoverage
     Publish scoverage results as a trend graph.
     Requires the Jenkins :jenkins-wiki:`Scoverage Plugin <Scoverage+Plugin>`.
 
     :arg str report-directory: This is a directory that specifies the locations
-                          where the xml scoverage report is generated
+        where the xml scoverage report is generated (required)
     :arg str report-file: This is a file name that is given to the xml
-                          scoverage report.
+        scoverage report (required)
 
     Example:
 
@@ -5017,13 +5568,17 @@ def scoverage(parser, xml_parent, data):
     scoverage = XML.SubElement(
         xml_parent,
         'org.jenkinsci.plugins.scoverage.ScoveragePublisher')
-    XML.SubElement(scoverage, 'reportDir').text = str(
-        data.get('report-directory', ''))
-    XML.SubElement(scoverage, 'reportFile').text = str(
-        data.get('report-file', ''))
+    scoverage.set('plugin', 'scoverage')
+
+    mappings = [
+        ('report-directory', 'reportDir', None),
+        ('report-file', 'reportFile', None),
+    ]
+    helpers.convert_mapping_to_xml(
+        scoverage, data, mappings, fail_required=True)
 
 
-def display_upstream_changes(parser, xml_parent, data):
+def display_upstream_changes(registry, xml_parent, data):
     """yaml: display-upstream-changes
     Display SCM changes of upstream jobs. Requires the Jenkins
     :jenkins-wiki:`Display Upstream Changes Plugin
@@ -5040,7 +5595,7 @@ def display_upstream_changes(parser, xml_parent, data):
         'DisplayUpstreamChangesRecorder')
 
 
-def gatling(parser, xml_parent, data):
+def gatling(registry, xml_parent, data):
     """yaml: gatling
     Publish gatling results as a trend graph
     Requires the Jenkins :jenkins-wiki:`Gatling Plugin <Gatling+Plugin>`.
@@ -5056,37 +5611,40 @@ def gatling(parser, xml_parent, data):
     XML.SubElement(gatling, 'enabled').text = 'true'
 
 
-def logstash(parser, xml_parent, data):
+def logstash(registry, xml_parent, data):
     """yaml: logstash
     Send job's console log to Logstash for processing and analyis of
     your job data. Also stores test metrics from Junit.
     Requires the Jenkins :jenkins-wiki:`Logstash Plugin <Logstash+Plugin>`.
 
-    :arg num max-lines: The maximum number of log lines to send to Logstash.
-        ( default 1000 )
+    :arg int max-lines: The maximum number of log lines to send to Logstash.
+        (default 1000)
     :arg bool fail-build: Mark build as failed if this step fails.
-        ( default false )
+        (default false)
 
     Minimal Example:
 
     .. literalinclude::  /../../tests/publishers/fixtures/logstash-min.yaml
+       :language: yaml
 
     Full Example:
 
     .. literalinclude::  /../../tests/publishers/fixtures/logstash-full.yaml
-
+       :language: yaml
     """
 
     logstash = XML.SubElement(xml_parent,
                               'jenkins.plugins.logstash.LogstashNotifier')
-    XML.SubElement(logstash, 'maxLines').text = str(
-        data.get('max-lines', 1000))
+    logstash.set('plugin', 'logstash')
 
-    XML.SubElement(logstash, 'failBuild').text = str(
-        data.get('fail-build', False))
+    mapping = [
+        ('max-lines', 'maxLines', 1000),
+        ('fail-build', 'failBuild', False),
+    ]
+    helpers.convert_mapping_to_xml(logstash, data, mapping, fail_required=True)
 
 
-def image_gallery(parser, xml_parent, data):
+def image_gallery(registry, xml_parent, data):
     """yaml: image-gallery
     Produce an image gallery using Javascript library. Requires the Jenkins
     :jenkins-wiki:`Image Gallery Plugin<Image+Gallery+Plugin>`.
@@ -5100,7 +5658,7 @@ def image_gallery(parser, xml_parent, data):
     :arg str title: gallery title (optional)
     :arg int image-width: width of the image (optional)
     :arg bool unstable-if-no-artifacts: mark build as unstable
-        if no archived artifacts were found (default False)
+        if no archived artifacts were found (default false)
     :arg str includes: include pattern (valid for archived-images-gallery
         gallery)
     :arg str base-root-folder: base root dir (valid for comparative gallery)
@@ -5160,26 +5718,28 @@ def image_gallery(parser, xml_parent, data):
             include_comparative_elements(gallery_config, gallery_def)
 
 
-def naginator(parser, xml_parent, data):
+def naginator(registry, xml_parent, data):
     """yaml: naginator
     Automatically reschedule a build after a build failure
     Requires the Jenkins :jenkins-wiki:`Naginator Plugin <Naginator+Plugin>`.
 
     :arg bool rerun-unstable-builds: Rerun build for unstable builds as well
-        as failures (default False)
+        as failures (default false)
+    :arg bool rerun-matrix-part: Rerun build only for failed parts on the
+        matrix (>=1.12) (default false)
     :arg int fixed-delay: Fixed delay before retrying build (cannot be used
         with progressive-delay-increment or progressive-delay-maximum.
-        This is the default delay type.  (Default 0)
+        This is the default delay type.  (default 0)
     :arg int progressive-delay-increment: Progressive delay before retrying
         build increment (cannot be used when fixed-delay is being used)
-        (Default 0)
+        (default 0)
     :arg int progressive-delay-maximum: Progressive delay before retrying
         maximum delay (cannot be used when fixed-delay is being used)
-        (Default 0)
+        (default 0)
     :arg int max-failed-builds: Maximum number of successive failed builds
-        (Default 0)
+        (default 0)
     :arg str regular-expression: Only rerun build if regular expression is
-        found in output (Default '')
+        found in output (default '')
 
     Example:
 
@@ -5195,6 +5755,8 @@ def naginator(parser, xml_parent, data):
         'regular-expression' in data).lower()
     XML.SubElement(naginator, 'rerunIfUnstable').text = str(
         data.get('rerun-unstable-builds', False)).lower()
+    XML.SubElement(naginator, 'rerunMatrixPart').text = str(
+        data.get('rerun-matrix-part', False)).lower()
     progressive_delay = ('progressive-delay-increment' in data or
                          'progressive-delay-maximum' in data)
     if 'fixed-delay' in data and progressive_delay:
@@ -5220,7 +5782,7 @@ def naginator(parser, xml_parent, data):
         data.get('max-failed-builds', '0'))
 
 
-def disable_failed_job(parser, xml_parent, data):
+def disable_failed_job(registry, xml_parent, data):
     """yaml: disable-failed-job
     Automatically disable failed jobs.
 
@@ -5251,16 +5813,9 @@ def disable_failed_job(parser, xml_parent, data):
     valid_conditions = ['Only Failure',
                         'Failure and Unstable',
                         'Only Unstable']
-
-    try:
-        disable_condition = str(data['when-to-disable'])
-    except KeyError as e:
-        raise MissingAttributeError(e.args[0])
-
-    if disable_condition not in valid_conditions:
-        raise InvalidAttributeError('when-to-disable', disable_condition,
-                                    valid_conditions)
-    XML.SubElement(xml_element, 'whenDisable').text = disable_condition
+    mapping = [('when-to-disable', 'whenDisable', None, valid_conditions)]
+    helpers.convert_mapping_to_xml(
+        xml_element, data, mapping, fail_required=True)
 
     if 'no-of-failures' in data:
         XML.SubElement(xml_element, 'failureTimes').text = str(data.get(
@@ -5270,7 +5825,7 @@ def disable_failed_job(parser, xml_parent, data):
         XML.SubElement(xml_element, 'optionalBrockChecked').text = 'false'
 
 
-def google_cloud_storage(parser, xml_parent, data):
+def google_cloud_storage(registry, xml_parent, data):
     """yaml: google-cloud-storage
     Upload build artifacts to Google Cloud Storage. Requires the
     Jenkins :jenkins-wiki:`Google Cloud Storage plugin
@@ -5305,7 +5860,7 @@ def google_cloud_storage(parser, xml_parent, data):
                       log inline in web browsers, rather than forcing it to be
                       downloaded (default true)
                     * **strip-prefix** (`str`) strip this prefix off the
-                      file names (default: not set)
+                      file names (default not set)
 
             * **classic** (`dict`)
                 :params:
@@ -5321,7 +5876,7 @@ def google_cloud_storage(parser, xml_parent, data):
                       artifacts inline in web browsers, rather than forcing
                       them to be downloaded (default false)
                     * **strip-prefix** (`str`) strip this prefix off the
-                      file names (default: not set)
+                      file names (default not set)
 
     Example:
 
@@ -5468,7 +6023,7 @@ def google_cloud_storage(parser, xml_parent, data):
                     properties, upload_element, types)
 
 
-def flowdock(parser, xml_parent, data):
+def flowdock(registry, xml_parent, data):
     """yaml: flowdock
     This plugin publishes job build results to a Flowdock flow.
 
@@ -5546,31 +6101,39 @@ def flowdock(parser, xml_parent, data):
     gen_setting('NotBuilt', False)
 
 
-def clamav(parser, xml_parent, data):
+def clamav(registry, xml_parent, data):
     """yaml: clamav
     Check files with ClamAV, an open source antivirus engine.
     Requires the Jenkins :jenkins-wiki:`ClamAV Plugin <ClamAV+Plugin>`.
 
-    :arg str includes: Files that should be scanned.
-      (default "")
-    :arg str excludes: Files that should be ignored.
-      (default "")
+    :arg str includes: Comma seperated list of files that should be scanned.
+        Must be set for ClamAV to check for artifacts. (default '')
+    :arg str excludes: Comma seperated list of files that should be ignored
+        (default '')
 
-    Example:
+    Full Example:
 
-    .. literalinclude:: /../../tests/publishers/fixtures/clamav001.yaml
+    .. literalinclude:: /../../tests/publishers/fixtures/clamav-full.yaml
+       :language: yaml
+
+    Minimal Example:
+
+    .. literalinclude:: /../../tests/publishers/fixtures/clamav-minimal.yaml
        :language: yaml
     """
     clamav = XML.SubElement(
         xml_parent,
         'org.jenkinsci.plugins.clamav.ClamAvRecorder')
-    XML.SubElement(clamav, 'includes').text = str(
-        data.get('includes', ''))
-    XML.SubElement(clamav, 'excludes').text = str(
-        data.get('excludes', ''))
+    clamav.set('plugin', 'clamav')
+
+    mappings = [
+        ('includes', 'includes', ''),
+        ('excludes', 'excludes', ''),
+    ]
+    helpers.convert_mapping_to_xml(clamav, data, mappings, fail_required=True)
 
 
-def testselector(parser, xml_parent, data):
+def testselector(registry, xml_parent, data):
     """yaml: testselector
     This plugin allows you to choose specific tests you want to run.
 
@@ -5626,7 +6189,7 @@ def testselector(parser, xml_parent, data):
         'multiplicity-field', '')
 
 
-def cloudformation(parser, xml_parent, data):
+def cloudformation(registry, xml_parent, data):
     """yaml: cloudformation
     Create cloudformation stacks before running a build and optionally
     delete them at the end.  Requires the Jenkins :jenkins-wiki:`AWS
@@ -5667,7 +6230,7 @@ def cloudformation(parser, xml_parent, data):
             * **arg str secret-key** - The Amazon API Secret Key (Required)
             * **arg bool prefix** - If selected the tear down process will look
               for the stack that Starts with the stack name with the oldest
-              creation date and will delete it.  (Default False)
+              creation date and will delete it.  (default false)
             * **arg array region** - The region to run cloudformation in.
               (Required)
 
@@ -5687,58 +6250,67 @@ def cloudformation(parser, xml_parent, data):
     .. literalinclude:: /../../tests/publishers/fixtures/cloudformation.yaml
        :language: yaml
     """
-    region_dict = cloudformation_region_dict()
-    stacks = cloudformation_init(xml_parent, data, 'CloudFormationPostBuild'
-                                 'Notifier')
+    region_dict = helpers.cloudformation_region_dict()
+    stacks = helpers.cloudformation_init(
+        xml_parent, data, 'CloudFormationPostBuildNotifier')
     for stack in data.get('create-stacks', []):
-        cloudformation_stack(xml_parent, stack, 'PostBuildStackBean',
-                             stacks, region_dict)
-    delete_stacks = cloudformation_init(xml_parent, data, 'CloudFormation'
-                                                          'Notifier')
+        helpers.cloudformation_stack(xml_parent, stack, 'PostBuildStackBean',
+                                     stacks, region_dict)
+    delete_stacks = helpers.cloudformation_init(
+        xml_parent, data, 'CloudFormationNotifier')
     for delete_stack in data.get('delete-stacks', []):
-        cloudformation_stack(xml_parent, delete_stack, 'SimpleStackBean',
-                             delete_stacks, region_dict)
+        helpers.cloudformation_stack(xml_parent, delete_stack,
+                                     'SimpleStackBean', delete_stacks,
+                                     region_dict)
 
 
-def whitesource(parser, xml_parent, data):
+def whitesource(registry, xml_parent, data):
     """yaml: whitesource
     This plugin brings automatic open source management to Jenkins users.
 
     Requires the Jenkins :jenkins-wiki:`Whitesource Plugin
     <Whitesource+Plugin>`.
 
-    :arg str product-token: Product name or token to update (Default '')
-    :arg str version: Product version (Default '')
+    :arg str product-token: Product name or token to update (default '')
+    :arg str version: Product version (default '')
     :arg str override-token: Override the api token from the global config
-        (Default '')
+        (default '')
     :arg str project-token: Token uniquely identifying the project to update
-        (Default '')
-    :arg list includes: list of libraries to include (Default '[]')
-    :arg list excludes: list of libraries to exclude (Default '[]')
+        (default '')
+    :arg list includes: list of libraries to include (default '[]')
+    :arg list excludes: list of libraries to exclude (default '[]')
     :arg str policies: Whether to override the global settings.  Valid values:
-        global, enable, disable (Default 'global')
+        global, enable, disable (default 'global')
+    :arg str requester-email: Email of the WhiteSource user that requests to
+        update WhiteSource (>=1.5.1) (default '')
 
-    Example:
+    Full Example:
 
-    .. literalinclude:: /../../tests/publishers/fixtures/whitesource001.yaml
+    .. literalinclude:: /../../tests/publishers/fixtures/whitesource-full.yaml
+       :language: yaml
+
+    Minimal Example:
+
+    .. literalinclude::
+       /../../tests/publishers/fixtures/whitesource-minimal.yaml
        :language: yaml
     """
-
-    policies = ['global', 'enable', 'disable']
-    policies_value = str(data.get('policies', 'global').lower())
-    if policies_value not in policies:
-        raise InvalidAttributeError('policies', policies_value, policies)
     whitesource = XML.SubElement(xml_parent, 'org.whitesource.jenkins.'
                                              'WhiteSourcePublisher')
-    XML.SubElement(whitesource, 'jobCheckPolicies').text = policies_value
-    XML.SubElement(whitesource, 'jobApiToken').text = data.get(
-        'override-token', '')
-    XML.SubElement(whitesource, 'product').text = data.get(
-        'product-token', '')
-    XML.SubElement(whitesource, 'productVersion').text = data.get(
-        'version', '')
-    XML.SubElement(whitesource, 'projectToken').text = data.get(
-        'project-token', '')
+    whitesource.set('plugin', 'whitesource')
+    policies = ['global', 'enable', 'disable']
+
+    mappings = [
+        ('policies', 'jobCheckPolicies', 'global', policies),
+        ('override-token', 'jobApiToken', ''),
+        ('product-token', 'product', ''),
+        ('version', 'productVersion', ''),
+        ('project-token', 'projectToken', ''),
+        ('requester-email', 'requesterEmail', ''),
+    ]
+    helpers.convert_mapping_to_xml(
+        whitesource, data, mappings, fail_required=True)
+
     XML.SubElement(whitesource, 'libIncludes').text = ' '.join(
         data.get('includes', []))
     XML.SubElement(whitesource, 'libExcludes').text = ' '.join(
@@ -5746,7 +6318,7 @@ def whitesource(parser, xml_parent, data):
     XML.SubElement(whitesource, 'ignorePomModules').text = 'false'
 
 
-def hipchat(parser, xml_parent, data):
+def hipchat(registry, xml_parent, data):
     """yaml: hipchat
     Publisher that sends hipchat notifications on job events
     Requires the Jenkins :jenkins-wiki:`Hipchat Plugin
@@ -5759,20 +6331,20 @@ def hipchat(parser, xml_parent, data):
     :arg list rooms: list of HipChat rooms to post messages to, overrides
         global default (optional)
     :arg bool notify-start: post messages about build start event
-        (default False)
+        (default false)
     :arg bool notify-success: post messages about successful build event
-        (default False)
+        (default false)
     :arg bool notify-aborted: post messages about aborted build event
-        (default False)
+        (default false)
     :arg bool notify-not-built: post messages about build set to NOT_BUILT.
         This status code is used in a multi-stage build where a problem in
-        earlier stage prevented later stages from building. (default False)
+        earlier stage prevented later stages from building. (default false)
     :arg bool notify-unstable: post messages about unstable build event
-        (default False)
+        (default false)
     :arg bool notify-failure:  post messages about build failure event
-        (default False)
+        (default false)
     :arg bool notify-back-to-normal: post messages about build being back to
-        normal after being unstable or failed (default False)
+        normal after being unstable or failed (default false)
     :arg str start-message: This will override the default start message
         (optional)
     :arg str complete-message: This will override the default complete message
@@ -5793,20 +6365,16 @@ def hipchat(parser, xml_parent, data):
         XML.SubElement(hipchat, 'room').text = str(
             ",".join(data['rooms']))
 
-    XML.SubElement(hipchat, 'startNotification').text = str(
-        data.get('notify-start', False)).lower()
-    XML.SubElement(hipchat, 'notifySuccess').text = str(
-        data.get('notify-success', False)).lower()
-    XML.SubElement(hipchat, 'notifyAborted').text = str(
-        data.get('notify-aborted', False)).lower()
-    XML.SubElement(hipchat, 'notifyNotBuilt').text = str(
-        data.get('notify-not-built', False)).lower()
-    XML.SubElement(hipchat, 'notifyUnstable').text = str(
-        data.get('notify-unstable', False)).lower()
-    XML.SubElement(hipchat, 'notifyFailure').text = str(
-        data.get('notify-failure', False)).lower()
-    XML.SubElement(hipchat, 'notifyBackToNormal').text = str(
-        data.get('notify-back-to-normal', False)).lower()
+    mapping = [
+        ('notify-start', 'startNotification', False),
+        ('notify-success', 'notifySuccess', False),
+        ('notify-aborted', 'notifyAborted', False),
+        ('notify-not-built', 'notifyNotBuilt', False),
+        ('notify-unstable', 'notifyUnstable', False),
+        ('notify-failure', 'notifyFailure', False),
+        ('notify-back-to-normal', 'notifyBackToNormal', False),
+    ]
+    helpers.convert_mapping_to_xml(hipchat, data, mapping, fail_required=True)
 
     # optional settings, so only add XML in if set.
     if 'start-message' in data:
@@ -5817,7 +6385,7 @@ def hipchat(parser, xml_parent, data):
             data['complete-message'])
 
 
-def slack(parser, xml_parent, data):
+def slack(registry, xml_parent, data):
     """yaml: slack
     Publisher that sends slack notifications on job events.
 
@@ -5828,40 +6396,40 @@ def slack(parser, xml_parent, data):
     too.  When using Slack Plugin version >= 2.0, you should only configure the
     publisher.
 
-    :arg str team-domain: Your team's domain at slack. (default: '')
+    :arg str team-domain: Your team's domain at slack. (default '')
     :arg str auth-token: The integration token to be used when sending
-        notifications. (default: '')
+        notifications. (default '')
     :arg str build-server-url: Specify the URL for your server installation.
-        (default: '/')
+        (default '/')
     :arg str room: A comma seperated list of rooms / channels to post the
-        notifications to. (default: '')
+        notifications to. (default '')
     :arg bool notify-start: Send notification when the job starts (>=2.0).
-        (default: False)
+        (default false)
     :arg bool notify-success: Send notification on success (>=2.0).
-        (default: False)
+        (default false)
     :arg bool notify-aborted: Send notification when job is aborted (>=2.0).
-        (default: False)
+        (default false)
     :arg bool notify-not-built: Send notification when job set to NOT_BUILT
-        status (>=2.0). (default: False)
+        status (>=2.0). (default false)
     :arg bool notify-unstable: Send notification when job becomes unstable
-        (>=2.0). (default: False)
+        (>=2.0). (default false)
     :arg bool notify-failure: Send notification when job fails for the first
-        time (previous build was a success) (>=2.0).  (default: False)
+        time (previous build was a success) (>=2.0).  (default false)
     :arg bool notifiy-back-to-normal: Send notification when job is succeeding
-        again after being unstable or failed (>=2.0). (default: False)
+        again after being unstable or failed (>=2.0). (default false)
     :arg bool notify-repeated-failure: Send notification when job fails
         successively (previous build was also a failure) (>=2.0).
-        (default: False)
+        (default false)
     :arg bool include-test-summary: Include the test summary (>=2.0).
-        (default: False)
+        (default false)
     :arg str commit-info-choice: What commit information to include into
         notification message, "NONE" includes nothing about commits, "AUTHORS"
         includes commit list with authors only, and "AUTHORS_AND_TITLES"
-        includes commit list with authors and titles (>=2.0). (default: "NONE")
+        includes commit list with authors and titles (>=2.0). (default "NONE")
     :arg bool include-custom-message: Include a custom message into the
-        notification (>=2.0). (default: False)
+        notification (>=2.0). (default false)
     :arg str custom-message: Custom message to be included (>=2.0).
-        (default: '')
+        (default '')
 
     Example (version < 2.0):
 
@@ -5889,7 +6457,7 @@ def slack(parser, xml_parent, data):
 
     logger = logging.getLogger(__name__)
 
-    plugin_info = parser.registry.get_plugin_info('Slack Notification Plugin')
+    plugin_info = registry.get_plugin_info('Slack Notification Plugin')
     plugin_ver = pkg_resources.parse_version(plugin_info.get('version', "0"))
 
     mapping = (
@@ -5932,7 +6500,7 @@ def slack(parser, xml_parent, data):
 
         for yaml_name, _, _ in mapping_20:
             if yaml_name in data:
-                logger.warn(
+                logger.warning(
                     "'%s' is invalid with plugin version < 2.0, ignored",
                     yaml_name,
                 )
@@ -5956,7 +6524,7 @@ def slack(parser, xml_parent, data):
         _add_xml(slack, xml_name, value)
 
 
-def phabricator(parser, xml_parent, data):
+def phabricator(registry, xml_parent, data):
     """yaml: phabricator
     Integrate with `Phabricator <http://phabricator.org/>`_
 
@@ -5998,7 +6566,7 @@ def phabricator(parser, xml_parent, data):
             data.get('comment-with-console-link-on-failure')).lower()
 
 
-def openshift_build_canceller(parser, xml_parent, data):
+def openshift_build_canceller(registry, xml_parent, data):
     """yaml: openshift-build-canceller
     This action is intended to provide cleanup for a Jenkins job which failed
     because a build is hung (instead of terminating with a failure code);
@@ -6018,9 +6586,9 @@ def openshift_build_canceller(parser, xml_parent, data):
     :arg str namespace: If you run `oc get bc` for the project listed in
         "namespace", that is the value you want to put here. (default 'test')
     :arg str auth-token: The value here is what you supply with the --token
-        option when invoking the OpenShift `oc` command. (optional)
-    :arg str verbose: This flag is the toggle for
-        turning on or off detailed logging in this plug-in. (default 'false')
+        option when invoking the OpenShift `oc` command. (default '')
+    :arg bool verbose: This flag is the toggle for
+        turning on or off detailed logging in this plug-in. (default false)
 
     Full Example:
 
@@ -6044,13 +6612,12 @@ def openshift_build_canceller(parser, xml_parent, data):
         ("bld-cfg", 'bldCfg', 'frontend'),
         ("namespace", 'namespace', 'test'),
         ("auth-token", 'authToken', ''),
-        ("verbose", 'verbose', 'false'),
+        ("verbose", 'verbose', False),
     ]
+    helpers.convert_mapping_to_xml(osb, data, mapping, fail_required=True)
 
-    convert_mapping_to_xml(osb, data, mapping)
 
-
-def openshift_deploy_canceller(parser, xml_parent, data):
+def openshift_deploy_canceller(registry, xml_parent, data):
     """yaml: openshift-deploy-canceller
     This action is intended to provide cleanup for any OpenShift deployments
     left running when the Job completes; this step will allow you to perform
@@ -6067,9 +6634,9 @@ def openshift_deploy_canceller(parser, xml_parent, data):
     :arg str namespace: If you run `oc get bc` for the project listed in
         "namespace", that is the value you want to put here. (default 'test')
     :arg str auth-token: The value here is what you supply with the --token
-        option when invoking the OpenShift `oc` command. (optional)
-    :arg str verbose: This flag is the toggle for
-        turning on or off detailed logging in this plug-in. (default 'false')
+        option when invoking the OpenShift `oc` command. (default '')
+    :arg bool verbose: This flag is the toggle for
+        turning on or off detailed logging in this plug-in. (default false)
 
     Full Example:
 
@@ -6093,13 +6660,12 @@ def openshift_deploy_canceller(parser, xml_parent, data):
         ("dep-cfg", 'depCfg', 'frontend'),
         ("namespace", 'namespace', 'test'),
         ("auth-token", 'authToken', ''),
-        ("verbose", 'verbose', 'false'),
+        ("verbose", 'verbose', False),
     ]
+    helpers.convert_mapping_to_xml(osb, data, mapping, fail_required=True)
 
-    convert_mapping_to_xml(osb, data, mapping)
 
-
-def github_pull_request_merge(parser, xml_parent, data):
+def github_pull_request_merge(registry, xml_parent, data):
     """yaml: github-pull-request-merge
     This action merges the pull request that triggered the build (see the
     github pull request trigger)
@@ -6112,7 +6678,7 @@ def github_pull_request_merge(parser, xml_parent, data):
     :arg bool disallow-own-code: if `true` will allow merging your own pull
         requests, in opposite to needing someone else to trigger the merge.
         (default false)
-    :arg bool merge-comment: Comment to set on the merge commit (optional)
+    :arg str merge-comment: Comment to set on the merge commit (default '')
     :arg bool fail-on-non-merge: fail the job if the merge was unsuccessful
         (default false)
     :arg bool delete-on-merge: Delete the branch of the pull request on
@@ -6137,12 +6703,12 @@ def github_pull_request_merge(parser, xml_parent, data):
         # option, xml name, default value
         ("only-admins-merge", 'onlyAdminsMerge', 'false'),
         ("disallow-own-code", 'disallowOwnCode', 'false'),
-        ("merge-comment", 'mergeComment', None),
+        ("merge-comment", 'mergeComment', ''),
         ("fail-on-non-merge", 'failOnNonMerge', 'false'),
         ("delete-on-merge", 'deleteOnMerge', 'false'),
     ]
 
-    convert_mapping_to_xml(osb, data, mapping)
+    helpers.convert_mapping_to_xml(osb, data, mapping, fail_required=True)
 
 
 class Publishers(jenkins_jobs.modules.base.Base):
@@ -6151,8 +6717,8 @@ class Publishers(jenkins_jobs.modules.base.Base):
     component_type = 'publisher'
     component_list_type = 'publishers'
 
-    def gen_xml(self, parser, xml_parent, data):
+    def gen_xml(self, xml_parent, data):
         publishers = XML.SubElement(xml_parent, 'publishers')
 
         for action in data.get('publishers', []):
-            self.registry.dispatch('publisher', parser, publishers, action)
+            self.registry.dispatch('publisher', publishers, action)

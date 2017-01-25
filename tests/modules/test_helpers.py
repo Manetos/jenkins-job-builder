@@ -13,17 +13,17 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-import testtools
 from testtools.matchers import Equals
 import xml.etree.ElementTree as XML
 import yaml
 
+from jenkins_jobs.errors import InvalidAttributeError
 from jenkins_jobs.errors import MissingAttributeError
 from jenkins_jobs.modules.helpers import convert_mapping_to_xml
-from tests.base import LoggingFixture
+from tests import base
 
 
-class TestCaseTestHelpers(LoggingFixture, testtools.TestCase):
+class TestCaseTestHelpers(base.BaseTestCase):
 
     def test_convert_mapping_to_xml(self):
         """
@@ -68,3 +68,42 @@ class TestCaseTestHelpers(LoggingFixture, testtools.TestCase):
                           required_data,
                           required_mappings,
                           fail_required=True)
+
+        # Test invalid user input for list
+        user_input_root = XML.Element('testUserInput')
+        user_input_data = yaml.load("user-input-string: bye")
+        valid_inputs = ['hello']
+        user_input_mappings = [('user-input-string', 'userInputString',
+                                'user-input', valid_inputs)]
+
+        self.assertRaises(InvalidAttributeError,
+                          convert_mapping_to_xml,
+                          user_input_root,
+                          user_input_data,
+                          user_input_mappings)
+
+        # Test invalid user input for dict
+        user_input_root = XML.Element('testUserInput')
+        user_input_data = yaml.load("user-input-string: later")
+        valid_inputs = {'hello': 'world'}
+        user_input_mappings = [('user-input-string', 'userInputString',
+                                'user-input', valid_inputs)]
+
+        self.assertRaises(InvalidAttributeError,
+                          convert_mapping_to_xml,
+                          user_input_root,
+                          user_input_data,
+                          user_input_mappings)
+
+        # Test invalid key for dict
+        user_input_root = XML.Element('testUserInput')
+        user_input_data = yaml.load("user-input-string: world")
+        valid_inputs = {'hello': 'world'}
+        user_input_mappings = [('user-input-string', 'userInputString',
+                                'user-input', valid_inputs)]
+
+        self.assertRaises(InvalidAttributeError,
+                          convert_mapping_to_xml,
+                          user_input_root,
+                          user_input_data,
+                          user_input_mappings)

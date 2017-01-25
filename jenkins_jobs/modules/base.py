@@ -57,20 +57,22 @@ class Base(object):
     def __init__(self, registry):
         self.registry = registry
 
-    def handle_data(self, parser):
+    def handle_data(self, job_data):
         """This method is called before any XML is generated.  By
-        overriding this method, the module may manipulate the YAML
-        data structure on the parser however it likes before any XML
-        is generated.  If it has changed the data structure at all, it
-        must return ``True``, otherwise, it must return ``False``.
+        overriding this method, a module may arbitrarily modify a data
+        structure which will probably be the JJB YamlParser's intermediate data
+        representation. If it has changed the data structure at all, it must
+        return ``True``, otherwise, it must return ``False``.
 
-        :arg YAMLParser parser: the global YAML Parser
+        :arg dict job_data: the intermediate representation of job data
+        loaded from JJB Yaml files without variables interpolation or other
+        yaml expansions.
         :rtype: boolean
         """
 
         return False
 
-    def gen_xml(self, parser, xml_parent, data):
+    def gen_xml(self, xml_parent, data):
         """Update the XML element tree based on YAML data.  Override
         this method to add elements to the XML output.  Create new
         Element objects and add them to the xml_parent.  The YAML data

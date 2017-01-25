@@ -32,7 +32,9 @@
       <defaultContent>$DEFAULT_CONTENT</defaultContent>
       <attachmentsPattern/>
       <presendScript/>
+      <postsendScript/>
       <attachBuildLog>false</attachBuildLog>
+      <compressBuildLog>false</compressBuildLog>
       <saveOutput>false</saveOutput>
       <disabled>false</disabled>
       <replyTo>$DEFAULT_REPLYTO</replyTo>
@@ -55,7 +57,7 @@
   <scm class="hudson.scm.NullSCM"/>
   <builders/>
   <publishers>
-    <hudson.tasks.Mailer>
+    <hudson.tasks.Mailer plugin="mailer">
       <recipients>qa@example.com</recipients>
       <dontNotifyEveryUnstableBuild>false</dontNotifyEveryUnstableBuild>
       <sendToIndividuals>false</sendToIndividuals>

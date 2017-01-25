@@ -14,7 +14,7 @@
 
 
 """
-Reporters are like publishers but only applicable to Maven projets.
+Reporters are like publishers but only applicable to Maven projects.
 
 **Component**: reporters
   :Macro: reporter
@@ -39,7 +39,7 @@ from jenkins_jobs.modules.helpers import build_trends_publisher
 from jenkins_jobs.modules.helpers import findbugs_settings
 
 
-def email(parser, xml_parent, data):
+def email(registry, xml_parent, data):
     """yaml: email
     Email notifications on build failure.
 
@@ -48,6 +48,8 @@ def email(parser, xml_parent, data):
       unstable build (default true)
     :arg bool send-to-individuals: Send an email to the individual
       who broke the build (default false)
+    :arg bool notify-for-each-module: Send an email for each module
+      (e.g. failed, unstable). (default true)
 
     Example::
 
@@ -57,7 +59,7 @@ def email(parser, xml_parent, data):
     """
 
     mailer = XML.SubElement(xml_parent,
-                            'hudson.maven.reporters.Mailer')
+                            'hudson.maven.reporters.MavenMailer')
     XML.SubElement(mailer, 'recipients').text = data['recipients']
 
     # Note the logic reversal (included here to match the GUI
@@ -67,37 +69,37 @@ def email(parser, xml_parent, data):
         XML.SubElement(mailer, 'dontNotifyEveryUnstableBuild').text = 'true'
     XML.SubElement(mailer, 'sendToIndividuals').text = str(
         data.get('send-to-individuals', False)).lower()
-    # TODO: figure out what this is:
-    XML.SubElement(mailer, 'perModuleEmail').text = 'true'
+    XML.SubElement(mailer, 'perModuleEmail').text = str(
+        data.get('notify-for-every-module', True)).lower()
 
 
-def findbugs(parser, xml_parent, data):
+def findbugs(registry, xml_parent, data):
     """yaml: findbugs
     FindBugs reporting for builds
 
     Requires the Jenkins :jenkins-wiki:`FindBugs Plugin
     <FindBugs+Plugin>`.
 
-    :arg bool rank-priority: Use rank as priority (default: false)
+    :arg bool rank-priority: Use rank as priority (default false)
     :arg str include-files: Comma separated list of files to include.
-                            (Optional)
+        (Optional)
     :arg str exclude-files: Comma separated list of files to exclude.
-                            (Optional)
+        (Optional)
     :arg bool can-run-on-failed: Weather or not to run plug-in on failed builds
-                                 (default: false)
+        (default false)
     :arg int healthy: Sunny threshold (optional)
     :arg int unhealthy: Stormy threshold (optional)
     :arg str health-threshold: Threshold priority for health status
-      ('low', 'normal' or 'high', defaulted to 'low')
+        ('low', 'normal' or 'high', defaulted to 'low')
     :arg bool dont-compute-new: If set to false, computes new warnings based on
-                                the reference build (default true)
-    :arg bool use-delta-values: Use delta for new warnings. (Default: false)
+        the reference build (default true)
+    :arg bool use-delta-values: Use delta for new warnings. (default false)
     :arg bool use-previous-build-as-reference:  If set then the number of new
-      warnings will always be calculated based on the previous build. Otherwise
-      the reference build. (Default: false)
+        warnings will always be calculated based on the previous build.
+        Otherwise the reference build. (default false)
     :arg bool use-stable-build-as-reference: The number of new warnings will be
-      calculated based on the last stable build, allowing reverts of unstable
-      builds where the number of warnings was decreased. (default false)
+        calculated based on the last stable build, allowing reverts of unstable
+        builds where the number of warnings was decreased. (default false)
     :arg dict thresholds:
         :thresholds:
             * **unstable** (`dict`)
@@ -127,7 +129,6 @@ def findbugs(parser, xml_parent, data):
     Full Example:
 
     .. literalinclude::  /../../tests/reporters/fixtures/findbugs01.yaml
-
     """
     findbugs = XML.SubElement(xml_parent,
                               'hudson.plugins.findbugs.FindBugsReporter')
@@ -143,7 +144,7 @@ class Reporters(jenkins_jobs.modules.base.Base):
     component_type = 'reporter'
     component_list_type = 'reporters'
 
-    def gen_xml(self, parser, xml_parent, data):
+    def gen_xml(self, xml_parent, data):
         if 'reporters' not in data:
             return
 
@@ -154,4 +155,4 @@ class Reporters(jenkins_jobs.modules.base.Base):
         reporters = XML.SubElement(xml_parent, 'reporters')
 
         for action in data.get('reporters', []):
-            self.registry.dispatch('reporter', parser, reporters, action)
+            self.registry.dispatch('reporter', reporters, action)

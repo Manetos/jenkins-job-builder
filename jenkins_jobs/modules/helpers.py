@@ -12,10 +12,7 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-import logging
 import xml.etree.ElementTree as XML
-
-from six.moves import configparser
 
 from jenkins_jobs.errors import InvalidAttributeError
 from jenkins_jobs.errors import JenkinsJobsException
@@ -98,15 +95,12 @@ def config_file_provider_builder(xml_parent, data):
     for file in files:
         xml_file = XML.SubElement(xml_files, 'org.jenkinsci.plugins.'
                                   'configfiles.buildwrapper.ManagedFile')
-        file_id = file.get('file-id')
-        if file_id is None:
-            raise JenkinsJobsException("file-id is required for each "
-                                       "managed configuration file")
-        XML.SubElement(xml_file, 'fileId').text = str(file_id)
-        XML.SubElement(xml_file, 'targetLocation').text = file.get(
-            'target', '')
-        XML.SubElement(xml_file, 'variable').text = file.get(
-            'variable', '')
+        mapping = [
+            ('file-id', 'fileId', None),
+            ('target', 'targetLocation', ''),
+            ('variable', 'variable', ''),
+        ]
+        convert_mapping_to_xml(xml_file, file, mapping, fail_required=True)
 
 
 def config_file_provider_settings(xml_parent, data):
@@ -245,28 +239,18 @@ def copyartifact_build_selector(xml_parent, data, select_tag='selector'):
 
 def findbugs_settings(xml_parent, data):
     # General Options
-    rank_priority = str(data.get('rank-priority', False)).lower()
-    XML.SubElement(xml_parent, 'isRankActivated').text = rank_priority
-    include_files = data.get('include-files', '')
-    XML.SubElement(xml_parent, 'includePattern').text = include_files
-    exclude_files = data.get('exclude-files', '')
-    XML.SubElement(xml_parent, 'excludePattern').text = exclude_files
+    mapping = [
+        ('rank-priority', 'isRankActivated', False),
+        ('include-files', 'includePattern', ''),
+        ('exclude-files', 'excludePattern', ''),
+    ]
+    convert_mapping_to_xml(xml_parent, data, mapping, fail_required=True)
 
 
-def get_value_from_yaml_or_config_file(key, section, data, parser):
-    logger = logging.getLogger(__name__)
+def get_value_from_yaml_or_config_file(key, section, data, jjb_config):
     result = data.get(key, '')
     if result == '':
-        try:
-            result = parser.config.get(
-                section, key
-            )
-        except (configparser.NoSectionError, configparser.NoOptionError,
-                JenkinsJobsException) as e:
-            logger.warning("You didn't set a " + key +
-                           " neither in the yaml job definition nor in" +
-                           " the " + section + " section, blank default" +
-                           " value will be applied:\n{0}".format(e))
+        result = jjb_config.get_plugin_config(section, key)
     return result
 
 
@@ -355,57 +339,51 @@ def artifactory_optional_props(xml_parent, data, target):
             yaml_prop, '')
 
     common_bool_props = [
-        # xml property name, yaml property name, default value
-        ('deployArtifacts', 'deploy-artifacts', True),
-        ('discardOldBuilds', 'discard-old-builds', False),
-        ('discardBuildArtifacts', 'discard-build-artifacts', False),
-        ('deployBuildInfo', 'publish-build-info', False),
-        ('includeEnvVars', 'env-vars-include', False),
-        ('runChecks', 'run-checks', False),
-        ('includePublishArtifacts', 'include-publish-artifacts', False),
-        ('licenseAutoDiscovery', 'license-auto-discovery', True),
-        ('enableIssueTrackerIntegration', 'enable-issue-tracker-integration',
+        # yaml property name, xml property name, default value
+        ('deploy-artifacts', 'deployArtifacts', True),
+        ('discard-old-builds', 'discardOldBuilds', False),
+        ('discard-build-artifacts', 'discardBuildArtifacts', False),
+        ('publish-build-info', 'deployBuildInfo', False),
+        ('env-vars-include', 'includeEnvVars', False),
+        ('run-checks', 'runChecks', False),
+        ('include-publish-artifacts', 'includePublishArtifacts', False),
+        ('license-auto-discovery', 'licenseAutoDiscovery', True),
+        ('enable-issue-tracker-integration', 'enableIssueTrackerIntegration',
             False),
-        ('aggregateBuildIssues', 'aggregate-build-issues', False),
-        ('blackDuckRunChecks', 'black-duck-run-checks', False),
-        ('blackDuckIncludePublishedArtifacts',
-            'black-duck-include-published-artifacts', False),
-        ('autoCreateMissingComponentRequests',
-            'auto-create-missing-component-requests', True),
-        ('autoDiscardStaleComponentRequests',
-            'auto-discard-stale-component-requests', True),
-        ('filterExcludedArtifactsFromBuild',
-            'filter-excluded-artifacts-from-build', False)
+        ('aggregate-build-issues', 'aggregateBuildIssues', False),
+        ('black-duck-run-checks', 'blackDuckRunChecks', False),
+        ('black-duck-include-published-artifacts',
+            'blackDuckIncludePublishedArtifacts', False),
+        ('auto-create-missing-component-requests',
+            'autoCreateMissingComponentRequests', True),
+        ('auto-discard-stale-component-requests',
+            'autoDiscardStaleComponentRequests', True),
+        ('filter-excluded-artifacts-from-build',
+            'filterExcludedArtifactsFromBuild', False)
     ]
-
-    for (xml_prop, yaml_prop, default_value) in common_bool_props:
-        XML.SubElement(xml_parent, xml_prop).text = str(data.get(
-            yaml_prop, default_value)).lower()
+    convert_mapping_to_xml(
+        xml_parent, data, common_bool_props, fail_required=True)
 
     if 'wrappers' in target:
         wrapper_bool_props = [
-            ('enableResolveArtifacts', 'enable-resolve-artifacts', False),
-            ('disableLicenseAutoDiscovery',
-                'disable-license-auto-discovery', False),
-            ('recordAllDependencies',
-                'record-all-dependencies', False)
+            ('enable-resolve-artifacts', 'enableResolveArtifacts', False),
+            ('disable-license-auto-discovery',
+                'disableLicenseAutoDiscovery', False),
+            ('record-all-dependencies',
+                'recordAllDependencies', False)
         ]
-
-        for (xml_prop, yaml_prop, default_value) in wrapper_bool_props:
-            XML.SubElement(xml_parent, xml_prop).text = str(data.get(
-                yaml_prop, default_value)).lower()
+        convert_mapping_to_xml(
+            xml_parent, data, wrapper_bool_props, fail_required=True)
 
     if 'publishers' in target:
         publisher_bool_props = [
-            ('evenIfUnstable', 'even-if-unstable', False),
-            ('passIdentifiedDownstream', 'pass-identified-downstream', False),
-            ('allowPromotionOfNonStagedBuilds',
-                'allow-promotion-of-non-staged-builds', False)
+            ('even-if-unstable', 'evenIfUnstable', False),
+            ('pass-identified-downstream', 'passIdentifiedDownstream', False),
+            ('allow-promotion-of-non-staged-builds',
+                'allowPromotionOfNonStagedBuilds', False)
         ]
-
-        for (xml_prop, yaml_prop, default_value) in publisher_bool_props:
-            XML.SubElement(xml_parent, xml_prop).text = str(data.get(
-                yaml_prop, default_value)).lower()
+        convert_mapping_to_xml(
+            xml_parent, data, publisher_bool_props, fail_required=True)
 
 
 def artifactory_common_details(details, data):
@@ -446,6 +424,43 @@ def append_git_revision_config(parent, config_def):
     XML.SubElement(params, 'combineQueuedCommits').text = combine_commits
 
 
+def test_fairy_common(xml_element, data):
+    xml_element.set('plugin', 'TestFairy')
+    valid_max_duration = ['10m', '60m', '300m', '1440m']
+    valid_interval = [1, 2, 5]
+    valid_video_quality = ['high', 'medium', 'low']
+
+    mappings = [
+        # General
+        ('apikey', 'apiKey', None),
+        ('appfile', 'appFile', None),
+        ('tester-groups', 'testersGroups', ''),
+        ('notify-testers', 'notifyTesters', True),
+        ('autoupdate', 'autoUpdate', True),
+        # Session
+        ('max-duration', 'maxDuration', '10m', valid_max_duration),
+        ('record-on-background', 'recordOnBackground', False),
+        ('data-only-wifi', 'dataOnlyWifi', False),
+        # Video
+        ('video-enabled', 'isVideoEnabled', True),
+        ('screenshot-interval', 'screenshotInterval', 1, valid_interval),
+        ('video-quality', 'videoQuality', 'high', valid_video_quality),
+        # Metrics
+        ('cpu', 'cpu', True),
+        ('memory', 'memory', True),
+        ('logs', 'logs', True),
+        ('network', 'network', False),
+        ('phone-signal', 'phoneSignal', False),
+        ('wifi', 'wifi', False),
+        ('gps', 'gps', False),
+        ('battery', 'battery', False),
+        ('opengl', 'openGl', False),
+        # Advanced options
+        ('advanced-options', 'advancedOptions', '')
+    ]
+    convert_mapping_to_xml(xml_element, data, mappings, fail_required=True)
+
+
 def convert_mapping_to_xml(parent, data, mapping, fail_required=False):
     """Convert mapping to XML
 
@@ -458,10 +473,27 @@ def convert_mapping_to_xml(parent, data, mapping, fail_required=False):
     configuring the XML tag for the parameter. We recommend for new plugins to
     set fail_required=True and instead of optional parameters provide a default
     value for all paramters that are not required instead.
+
+    valid_options provides a way to check if the value the user input is from a
+    list of available options. When the user pass a value that is not supported
+    from the list, it raise an InvalidAttributeError.
+
+    valid_dict provides a way to set options through their key and value. If
+    the user input corresponds to a key, the XML tag will use the key's value
+    for its element. When the user pass a value that there are no keys for,
+    it raise an InvalidAttributeError.
     """
     for elem in mapping:
-        (optname, xmlname, val) = elem
+        (optname, xmlname, val) = elem[:3]
         val = data.get(optname, val)
+
+        valid_options = []
+        valid_dict = {}
+        if len(elem) == 4:
+            if type(elem[3]) is list:
+                valid_options = elem[3]
+            if type(elem[3]) is dict:
+                valid_dict = elem[3]
 
         # Use fail_required setting to allow support for optional parameters
         # we will phase this out in the future as we rework plugins so that
@@ -475,6 +507,18 @@ def convert_mapping_to_xml(parent, data, mapping, fail_required=False):
         if val is None and fail_required is False:
             continue
 
+        if valid_dict:
+            if val not in valid_dict:
+                raise InvalidAttributeError(optname, val, valid_dict.keys())
+
+        if valid_options:
+            if val not in valid_options:
+                raise InvalidAttributeError(optname, val, valid_options)
+
         if type(val) == bool:
             val = str(val).lower()
-        XML.SubElement(parent, xmlname).text = str(val)
+
+        if val in valid_dict:
+            XML.SubElement(parent, xmlname).text = str(valid_dict[val])
+        else:
+            XML.SubElement(parent, xmlname).text = str(val)

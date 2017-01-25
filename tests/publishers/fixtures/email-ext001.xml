@@ -164,7 +164,9 @@
       <defaultContent>The build has finished</defaultContent>
       <attachmentsPattern>*/foo*.log</attachmentsPattern>
       <presendScript>cancel=true</presendScript>
+      <postsendScript>cancel=true</postsendScript>
       <attachBuildLog>false</attachBuildLog>
+      <compressBuildLog>false</compressBuildLog>
       <saveOutput>true</saveOutput>
       <disabled>false</disabled>
       <replyTo>foo@example.com</replyTo>

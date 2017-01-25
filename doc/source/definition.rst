@@ -72,7 +72,9 @@ back to its template.
 
 Sometimes it is useful to have the same job name format used even
 where the template contents may vary. `Ids` provide a mechanism to
-support such use cases.
+support such use cases in addition to simplifying referencing
+templates when the name contains the more complex substitution with
+default values.
 
 
 Default Values for Template Variables
@@ -87,7 +89,7 @@ This can be used to provide common settings for particular templates.
 For example:
 
 .. literalinclude::
-    /../..tests/yamlparser/fixtures/template_default_variables.yaml
+    /../../tests/yamlparser/fixtures/template_default_variables.yaml
    :language: yaml
 
 To use a default value for a variable used in the name would be
@@ -177,6 +179,20 @@ the Job Templates in the Job Group will be realized.  For example:
 
 Would cause the jobs `project-name-unit-tests` and `project-name-perf-tests` to be created
 in Jenkins.
+
+.. _views:
+
+Views
+^^^^^
+
+A view is a particular way of displaying a specific set of jobs. To
+create a view, you must define a view in a YAML file and have a variable called view-type with a valid value. It looks like this::
+
+  - view:
+      name: view-name
+      view-type: list
+
+Views are processed differently than Jobs and therefore will not work within a `Project`_ or a `Job Template`_.
 
 .. _macro:
 
@@ -319,9 +335,9 @@ to reference it instead of the name. This has two primary functions:
   still using multiple templates to handle subtle variables in job
   requirements.
 * Provides a simpler name for a `job-template` where you have multiple
-  variables in the name and don't wish to have to include this information
-  in every use. This also allows changing the template output name without
-  impacting references.
+  variables including default values in the name and don't wish to have
+  to include this information in every use. This also makes changing
+  the template output name without impacting references.
 
 Example:
 
@@ -494,4 +510,3 @@ Generally the sequence is:
     #. builders (maven, freestyle, matrix, etc..)
     #. postbuilders (maven only, configured like :ref:`builders`)
     #. publishers/reporters/notifications
-

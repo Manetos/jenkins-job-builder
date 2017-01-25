@@ -37,13 +37,14 @@ from jenkins_jobs.modules.helpers import artifactory_env_vars_patterns
 from jenkins_jobs.modules.helpers import artifactory_optional_props
 from jenkins_jobs.modules.helpers import artifactory_repository
 from jenkins_jobs.modules.helpers import config_file_provider_builder
+from jenkins_jobs.modules.helpers import convert_mapping_to_xml
 
 logger = logging.getLogger(__name__)
 
 MIN_TO_SEC = 60
 
 
-def docker_custom_build_env(parser, xml_parent, data):
+def docker_custom_build_env(registry, xml_parent, data):
     """yaml: docker-custom-build-env
     Allows the definition of a build environment for a job using a Docker
     container.
@@ -154,7 +155,7 @@ def docker_custom_build_env(parser, xml_parent, data):
     XML.SubElement(entry_xml, 'net').text = data.get('net', 'bridge')
 
 
-def ci_skip(parser, xml_parent, data):
+def ci_skip(registry, xml_parent, data):
     """yaml: ci-skip
     Skip making a build for certain push.
     Just add [ci skip] into your commit's message to let Jenkins know,
@@ -182,7 +183,7 @@ def ci_skip(parser, xml_parent, data):
     })
 
 
-def config_file_provider(parser, xml_parent, data):
+def config_file_provider(registry, xml_parent, data):
     """yaml: config-file-provider
     Provide configuration files (i.e., settings.xml for maven etc.)
     which will be copied to the job's workspace.
@@ -195,9 +196,9 @@ def config_file_provider(parser, xml_parent, data):
       :files: * **file-id** (`str`) -- The identifier for the managed config
                 file
               * **target** (`str`) -- Define where the file should be created
-                (optional)
+                (default '')
               * **variable** (`str`) -- Define an environment variable to be
-                used (optional)
+                used (default '')
 
     Example:
 
@@ -211,7 +212,7 @@ def config_file_provider(parser, xml_parent, data):
     config_file_provider_builder(cfp, data)
 
 
-def logfilesize(parser, xml_parent, data):
+def logfilesize(registry, xml_parent, data):
     """yaml: logfilesize
     Abort the build if its logfile becomes too big.
     Requires the Jenkins :jenkins-wiki:`Logfilesizechecker Plugin
@@ -224,29 +225,28 @@ def logfilesize(parser, xml_parent, data):
     :arg int size: Abort the build if logfile size is bigger than this
         value (in MiB, default 128). Only applies if set-own is true.
 
-    Minimum config example:
+    Full Example:
 
-    .. literalinclude:: /../../tests/wrappers/fixtures/logfilesize002.yaml
+    .. literalinclude:: /../../tests/wrappers/fixtures/logfilesize-full.yaml
 
-    Full config example:
+    Minimal Example:
 
-    .. literalinclude:: /../../tests/wrappers/fixtures/logfilesize001.yaml
-
+    .. literalinclude:: /../../tests/wrappers/fixtures/logfilesize-minimal.yaml
     """
     lfswrapper = XML.SubElement(xml_parent,
                                 'hudson.plugins.logfilesizechecker.'
                                 'LogfilesizecheckerWrapper')
     lfswrapper.set("plugin", "logfilesizechecker")
 
-    XML.SubElement(lfswrapper, 'setOwn').text = str(
-        data.get('set-own', 'false')).lower()
-    XML.SubElement(lfswrapper, 'maxLogSize').text = str(
-        data.get('size', '128')).lower()
-    XML.SubElement(lfswrapper, 'failBuild').text = str(
-        data.get('fail', 'false')).lower()
+    mapping = [
+        ('set-own', 'setOwn', False),
+        ('size', 'maxLogSize', 128),
+        ('fail', 'failBuild', False),
+    ]
+    convert_mapping_to_xml(lfswrapper, data, mapping, fail_required=True)
 
 
-def timeout(parser, xml_parent, data):
+def timeout(registry, xml_parent, data):
     """yaml: timeout
     Abort the build if it runs too long.
     Requires the Jenkins :jenkins-wiki:`Build Timeout Plugin
@@ -310,7 +310,7 @@ def timeout(parser, xml_parent, data):
     prefix = 'hudson.plugins.build__timeout.'
     twrapper = XML.SubElement(xml_parent, prefix + 'BuildTimeoutWrapper')
 
-    plugin_info = parser.registry.get_plugin_info(
+    plugin_info = registry.get_plugin_info(
         "Jenkins build timeout plugin")
     version = pkg_resources.parse_version(plugin_info.get("version", "0"))
 
@@ -425,7 +425,7 @@ def timeout(parser, xml_parent, data):
         XML.SubElement(twrapper, 'timeoutType').text = tout_type
 
 
-def timestamps(parser, xml_parent, data):
+def timestamps(registry, xml_parent, data):
     """yaml: timestamps
     Add timestamps to the console log.
     Requires the Jenkins :jenkins-wiki:`Timestamper Plugin <Timestamper>`.
@@ -439,7 +439,7 @@ def timestamps(parser, xml_parent, data):
                    'hudson.plugins.timestamper.TimestamperBuildWrapper')
 
 
-def ansicolor(parser, xml_parent, data):
+def ansicolor(registry, xml_parent, data):
     """yaml: ansicolor
     Translate ANSI color codes to HTML in the console log.
     Requires the Jenkins :jenkins-wiki:`Ansi Color Plugin <AnsiColor+Plugin>`.
@@ -466,7 +466,7 @@ def ansicolor(parser, xml_parent, data):
         XML.SubElement(cwrapper, 'colorMapName').text = colormap
 
 
-def build_keeper(parser, xml_parent, data):
+def build_keeper(registry, xml_parent, data):
     """yaml: build-keeper
     Keep builds based on specific policy.
     Requires the Jenkins :jenkins-wiki:`Build Keeper Plugin
@@ -482,7 +482,7 @@ def build_keeper(parser, xml_parent, data):
     :arg int build-period: Number argument to calculate build to keep,
         depends on the policy. (default 0)
     :arg bool dont-keep-failed: Flag to indicate if to keep failed builds.
-        (default False)
+        (default false)
     :arg int number-of-fails: number of consecutive failed builds in order
         to mark first as keep forever, only applies to keep-first-failed
         policy (default 0)
@@ -539,7 +539,7 @@ def build_keeper(parser, xml_parent, data):
         InvalidAttributeError('policy', policy, valid_policies)
 
 
-def live_screenshot(parser, xml_parent, data):
+def live_screenshot(registry, xml_parent, data):
     """yaml: live-screenshot
     Show live screenshots of running jobs in the job list.
     Requires the Jenkins :jenkins-wiki:`Live-Screenshot Plugin
@@ -550,24 +550,28 @@ def live_screenshot(parser, xml_parent, data):
 
     File type must be .png and they must be located inside the $WORKDIR.
 
-    Example using defaults:
+    Full Example:
 
-    .. literalinclude:: /../../tests/wrappers/fixtures/live_screenshot001.yaml
+    .. literalinclude::
+       /../../tests/wrappers/fixtures/live-screenshot-full.yaml
 
-    or specifying the files to use:
+    Minimal Example:
 
-    .. literalinclude:: /../../tests/wrappers/fixtures/live_screenshot002.yaml
+    .. literalinclude::
+       /../../tests/wrappers/fixtures/live-screenshot-minimal.yaml
     """
     live = XML.SubElement(
         xml_parent,
         'org.jenkinsci.plugins.livescreenshot.LiveScreenshotBuildWrapper')
-    XML.SubElement(live, 'fullscreenFilename').text = data.get(
-        'full-size', 'screenshot.png')
-    XML.SubElement(live, 'thumbnailFilename').text = data.get(
-        'thumbnail', 'screenshot-thumb.png')
+    live.set('plugin', 'livescreenshot')
+    mapping = [
+        ('full-size', 'fullscreenFilename', 'screenshot.png'),
+        ('thumbnail', 'thumbnailFilename', 'screenshot-thumb.png'),
+    ]
+    convert_mapping_to_xml(live, data, mapping, fail_required=True)
 
 
-def mask_passwords(parser, xml_parent, data):
+def mask_passwords(registry, xml_parent, data):
     """yaml: mask-passwords
     Hide passwords in the console log.
     Requires the Jenkins :jenkins-wiki:`Mask Passwords Plugin
@@ -583,7 +587,7 @@ def mask_passwords(parser, xml_parent, data):
                    'MaskPasswordsBuildWrapper')
 
 
-def workspace_cleanup(parser, xml_parent, data):
+def workspace_cleanup(registry, xml_parent, data):
     """yaml: workspace-cleanup (pre-build)
 
     Requires the Jenkins :jenkins-wiki:`Workspace Cleanup Plugin
@@ -593,7 +597,7 @@ def workspace_cleanup(parser, xml_parent, data):
 
     :arg list include: list of files to be included
     :arg list exclude: list of files to be excluded
-    :arg bool dirmatch: Apply pattern to directories too (default: false)
+    :arg bool dirmatch: Apply pattern to directories too (default false)
     :arg str check-parameter: boolean environment variable to check to
         determine whether to actually clean up
     :arg str external-deletion-command: external deletion command to run
@@ -632,7 +636,7 @@ def workspace_cleanup(parser, xml_parent, data):
         data.get('external-deletion-command', ''))
 
 
-def m2_repository_cleanup(parser, xml_parent, data):
+def m2_repository_cleanup(registry, xml_parent, data):
     """yaml: m2-repository-cleanup
     Configure M2 Repository Cleanup
     Requires the Jenkins :jenkins-wiki:`M2 Repository Cleanup
@@ -660,7 +664,7 @@ def m2_repository_cleanup(parser, xml_parent, data):
         XML.SubElement(p, 'string').text = pattern
 
 
-def rvm_env(parser, xml_parent, data):
+def rvm_env(registry, xml_parent, data):
     """yaml: rvm-env
     Set the RVM implementation
     Requires the Jenkins :jenkins-wiki:`Rvm Plugin <RVM+Plugin>`.
@@ -699,27 +703,27 @@ def rvm_env(parser, xml_parent, data):
                     'ruby-class': 'String'}).text = "rvm"
 
 
-def rbenv(parser, xml_parent, data):
+def rbenv(registry, xml_parent, data):
     """yaml: rbenv
     Set the rbenv implementation.
     Requires the Jenkins :jenkins-wiki:`rbenv plugin <rbenv+plugin>`.
 
     All parameters are optional.
 
-    :arg str ruby-version: Version of Ruby to use  (default: 1.9.3-p484)
+    :arg str ruby-version: Version of Ruby to use  (default 1.9.3-p484)
     :arg bool ignore-local-version: If true, ignore local Ruby
         version (defined in the ".ruby-version" file in workspace) even if it
-        has been defined  (default: false)
+        has been defined  (default false)
     :arg str preinstall-gem-list: List of gems to install
-        (default: 'bundler,rake')
-    :arg str rbenv-root: RBENV_ROOT  (default: $HOME/.rbenv)
+        (default 'bundler,rake')
+    :arg str rbenv-root: RBENV_ROOT  (default $HOME/.rbenv)
     :arg str rbenv-repo: Which repo to clone rbenv from
-        (default: https://github.com/rbenv/rbenv)
-    :arg str rbenv-branch: Which branch to clone rbenv from  (default: master)
+        (default https://github.com/rbenv/rbenv)
+    :arg str rbenv-branch: Which branch to clone rbenv from  (default master)
     :arg str ruby-build-repo: Which repo to clone ruby-build from
-        (default: https://github.com/rbenv/ruby-build)
+        (default https://github.com/rbenv/ruby-build)
     :arg str ruby-build-branch: Which branch to clone ruby-build from
-        (default: master)
+        (default master)
 
     Example:
 
@@ -784,7 +788,7 @@ def rbenv(parser, xml_parent, data):
                     'pluginid': 'rbenv'})
 
 
-def build_name(parser, xml_parent, data):
+def build_name(registry, xml_parent, data):
     """yaml: build-name
     Set the name of the build
     Requires the Jenkins :jenkins-wiki:`Build Name Setter Plugin
@@ -806,7 +810,7 @@ def build_name(parser, xml_parent, data):
     XML.SubElement(bsetter, 'template').text = data['name']
 
 
-def port_allocator(parser, xml_parent, data):
+def port_allocator(registry, xml_parent, data):
     """yaml: port-allocator
     Assign unique TCP port numbers
     Requires the Jenkins :jenkins-wiki:`Port Allocator Plugin
@@ -827,8 +831,9 @@ def port_allocator(parser, xml_parent, data):
     names = data.get('names')
     if not names:
         logger = logging.getLogger(__name__)
-        logger.warn('port_allocator name is deprecated, use a names list '
-                    ' instead')
+        logger.warning(
+            'port_allocator name is deprecated, use a names list '
+            ' instead')
         names = [data['name']]
     for name in names:
         dpt = XML.SubElement(ports,
@@ -837,7 +842,7 @@ def port_allocator(parser, xml_parent, data):
         XML.SubElement(dpt, 'name').text = name
 
 
-def locks(parser, xml_parent, data):
+def locks(registry, xml_parent, data):
     """yaml: locks
     Control parallel execution of jobs.
     Requires the Jenkins :jenkins-wiki:`Locks and Latches Plugin
@@ -862,7 +867,7 @@ def locks(parser, xml_parent, data):
             XML.SubElement(lockwrapper, 'name').text = lock
 
 
-def copy_to_slave(parser, xml_parent, data):
+def copy_to_slave(registry, xml_parent, data):
     """yaml: copy-to-slave
     Copy files to slave before build
     Requires the Jenkins :jenkins-wiki:`Copy To Slave Plugin
@@ -870,13 +875,13 @@ def copy_to_slave(parser, xml_parent, data):
 
     :arg list includes: list of file patterns to copy (optional)
     :arg list excludes: list of file patterns to exclude (optional)
-    :arg bool flatten: flatten directory structure (Default: False)
+    :arg bool flatten: flatten directory structure (default false)
     :arg str relative-to: base location of includes/excludes, must be home
         ($JENKINS_HOME), somewhereElse ($JENKINS_HOME/copyToSlave),
         userContent ($JENKINS_HOME/userContent) or workspace
-        (Default: userContent)
+        (default userContent)
     :arg bool include-ant-excludes: exclude ant's default excludes
-        (Default: False)
+        (default false)
 
     Minimal Example:
 
@@ -908,7 +913,7 @@ def copy_to_slave(parser, xml_parent, data):
     XML.SubElement(cs, 'hudsonHomeRelative').text = 'false'
 
 
-def inject(parser, xml_parent, data):
+def inject(registry, xml_parent, data):
     """yaml: inject
     Add or override environment variables to the whole build process
     Requires the Jenkins :jenkins-wiki:`EnvInject Plugin <EnvInject+Plugin>`.
@@ -940,7 +945,7 @@ def inject(parser, xml_parent, data):
     XML.SubElement(info, 'loadFilesFromMaster').text = 'false'
 
 
-def inject_ownership_variables(parser, xml_parent, data):
+def inject_ownership_variables(registry, xml_parent, data):
     """yaml: inject-ownership-variables
     Inject ownership variables to the build as environment variables.
     Requires the Jenkins :jenkins-wiki:`EnvInject Plugin <EnvInject+Plugin>`
@@ -964,13 +969,13 @@ def inject_ownership_variables(parser, xml_parent, data):
         str(data.get('job-variables', False)).lower()
 
 
-def inject_passwords(parser, xml_parent, data):
+def inject_passwords(registry, xml_parent, data):
     """yaml: inject-passwords
     Inject passwords to the build as environment variables.
     Requires the Jenkins :jenkins-wiki:`EnvInject Plugin <EnvInject+Plugin>`.
 
     :arg bool global: inject global passwords to the job
-    :arg bool mask-password-params: mask passsword parameters
+    :arg bool mask-password-params: mask password parameters
     :arg list job-passwords: key value pair of job passwords
 
         :Parameter: * **name** (`str`) Name of password
@@ -995,7 +1000,7 @@ def inject_passwords(parser, xml_parent, data):
             XML.SubElement(entry, 'value').text = password['password']
 
 
-def env_file(parser, xml_parent, data):
+def env_file(registry, xml_parent, data):
     """yaml: env-file
     Add or override environment variables to the whole build process
     Requires the Jenkins :jenkins-wiki:`Environment File Plugin
@@ -1015,13 +1020,13 @@ def env_file(parser, xml_parent, data):
         eib, 'filePath', data.get('properties-file'))
 
 
-def env_script(parser, xml_parent, data):
+def env_script(registry, xml_parent, data):
     """yaml: env-script
     Add or override environment variables to the whole build process.
     Requires the Jenkins :jenkins-wiki:`Environment Script Plugin
     <Environment+Script+Plugin>`.
 
-    :arg script-content: The script to run (default: '')
+    :arg script-content: The script to run (default '')
     :arg str script-type: The script type.
 
         :script-types supported:
@@ -1029,7 +1034,7 @@ def env_script(parser, xml_parent, data):
             * **power-shell**
             * **batch-script**
     :arg only-run-on-parent: Only applicable for Matrix Jobs. If true, run only
-      on the matrix parent job (default: false)
+      on the matrix parent job (default false)
 
     Example:
 
@@ -1054,42 +1059,32 @@ def env_script(parser, xml_parent, data):
     XML.SubElement(el, 'onlyRunOnParent').text = only_on_parent
 
 
-def jclouds(parser, xml_parent, data):
+def jclouds(registry, xml_parent, data):
     """yaml: jclouds
     Uses JClouds to provide slave launching on most of the currently
     usable Cloud infrastructures.
     Requires the Jenkins :jenkins-wiki:`JClouds Plugin <JClouds+Plugin>`.
 
     :arg bool single-use: Whether or not to terminate the slave after use
-                          (default: False).
+                          (default false).
     :arg list instances: The name of the jclouds template to create an
                          instance from, and its parameters.
     :arg str cloud-name: The name of the jclouds profile containing the
                          specified template.
-    :arg int count: How many instances to create (default: 1).
+    :arg int count: How many instances to create (default 1).
     :arg bool stop-on-terminate: Whether or not to suspend instead of terminate
-                                 the instance (default: False).
+                                 the instance (default false).
 
-    Example::
+    Example:
 
-      wrappers:
-        - jclouds:
-            single-use: True
-            instances:
-              - jenkins-dev-slave:
-                  cloud-name: mycloud1
-                  count: 1
-                  stop-on-terminate: True
-              - jenkins-test-slave:
-                  cloud-name: mycloud2
-                  count: 2
-                  stop-on-terminate: False
+    .. literalinclude:: /../../tests/wrappers/fixtures/jclouds001.yaml
+       :language: yaml
+
     """
-    buildWrapper = XML.SubElement(xml_parent,
-                                  'jenkins.plugins.jclouds.compute.'
-                                  'JCloudsBuildWrapper')
-    instances = XML.SubElement(buildWrapper, 'instancesToRun')
     if 'instances' in data:
+        buildWrapper = XML.SubElement(
+            xml_parent, 'jenkins.plugins.jclouds.compute.JCloudsBuildWrapper')
+        instances = XML.SubElement(buildWrapper, 'instancesToRun')
         for foo in data['instances']:
             for template, params in foo.items():
                 instance = XML.SubElement(instances,
@@ -1108,7 +1103,7 @@ def jclouds(parser, xml_parent, data):
                        'JCloudsOneOffSlave')
 
 
-def openstack(parser, xml_parent, data):
+def openstack(registry, xml_parent, data):
     """yaml: openstack
     Provision slaves from OpenStack on demand.  Requires the Jenkins
     :jenkins-wiki:`Openstack Cloud Plugin <Openstack+Cloud+Plugin>`.
@@ -1125,11 +1120,11 @@ def openstack(parser, xml_parent, data):
               will be put in 'Specify Template Name as String' option. Not
               specifying or specifying False, instance template name will be
               put in 'Select Template from List' option. To use parameter
-              replacement, set this to True.  (default: False)
-            * **count** (`int`) -- How many instances to create (default: 1).
+              replacement, set this to True.  (default false)
+            * **count** (`int`) -- How many instances to create (default 1).
 
     :arg bool single-use: Whether or not to terminate the slave after use
-        (default: False).
+        (default false).
 
     Example:
 
@@ -1169,7 +1164,7 @@ def openstack(parser, xml_parent, data):
         XML.SubElement(xml_parent, tag_prefix + 'JCloudsOneOffSlave')
 
 
-def build_user_vars(parser, xml_parent, data):
+def build_user_vars(registry, xml_parent, data):
     """yaml: build-user-vars
     Set environment variables to the value of the user that started the build.
     Requires the Jenkins :jenkins-wiki:`Build User Vars Plugin
@@ -1183,7 +1178,7 @@ def build_user_vars(parser, xml_parent, data):
     XML.SubElement(xml_parent, 'org.jenkinsci.plugins.builduser.BuildUser')
 
 
-def release(parser, xml_parent, data):
+def release(registry, xml_parent, data):
     """yaml: release
     Add release build configuration
     Requires the Jenkins :jenkins-wiki:`Release Plugin <Release+Plugin>`.
@@ -1219,7 +1214,7 @@ def release(parser, xml_parent, data):
     if parameters:
         pdef = XML.SubElement(relwrap, 'parameterDefinitions')
         for param in parameters:
-            parser.registry.dispatch('parameter', parser, pdef, param)
+            registry.dispatch('parameter', pdef, param)
 
     builder_steps = {
         'pre-build': 'preBuildSteps',
@@ -1229,13 +1224,12 @@ def release(parser, xml_parent, data):
     }
     for step in builder_steps.keys():
         for builder in data.get(step, []):
-            parser.registry.dispatch('builder', parser,
-                                     XML.SubElement(relwrap,
-                                                    builder_steps[step]),
-                                     builder)
+            registry.dispatch('builder',
+                              XML.SubElement(relwrap, builder_steps[step]),
+                              builder)
 
 
-def sauce_ondemand(parser, xml_parent, data):
+def sauce_ondemand(registry, xml_parent, data):
     """yaml: sauce-ondemand
     Allows you to integrate Sauce OnDemand with Jenkins.  You can
     automate the setup and tear down of Sauce Connect and integrate
@@ -1339,7 +1333,35 @@ def sauce_ondemand(parser, xml_parent, data):
     XML.SubElement(sauce, 'options').text = options
 
 
-def pathignore(parser, xml_parent, data):
+def sonar(registry, xml_parent, data):
+    """yaml: sonar
+    Wrapper for SonarQube Plugin
+    Requires :jenkins-wiki:`SonarQube plugin <SonarQube+plugin>`
+
+    :arg str install-name: Release goals and options (default '')
+
+    Minimal Example:
+
+    .. literalinclude:: /../../tests/wrappers/fixtures/sonar-minimal.yaml
+       :language: yaml
+
+    Full Example:
+
+    .. literalinclude:: /../../tests/wrappers/fixtures/sonar-full.yaml
+       :language: yaml
+    """
+    sonar = XML.SubElement(
+        xml_parent, 'hudson.plugins.sonar.SonarBuildWrapper')
+    sonar.set('plugin', 'sonar')
+
+    if data.get('install-name'):
+        mapping = [
+            ('install-name', 'installationName', ''),
+        ]
+        convert_mapping_to_xml(sonar, data, mapping, fail_required=True)
+
+
+def pathignore(registry, xml_parent, data):
     """yaml: pathignore
     This plugin allows SCM-triggered jobs to ignore
     build requests if only certain paths have changed.
@@ -1375,7 +1397,7 @@ def pathignore(parser, xml_parent, data):
     })
 
 
-def pre_scm_buildstep(parser, xml_parent, data):
+def pre_scm_buildstep(registry, xml_parent, data):
     """yaml: pre-scm-buildstep
     Execute a Build Step before running the SCM
     Requires the Jenkins :jenkins-wiki:`pre-scm-buildstep <pre-scm-buildstep>`.
@@ -1405,16 +1427,16 @@ def pre_scm_buildstep(parser, xml_parent, data):
                          'PreSCMBuildStepsWrapper')
     bs = XML.SubElement(bsp, 'buildSteps')
     for step in data:
-        for edited_node in create_builders(parser, step):
+        for edited_node in create_builders(registry, step):
             bs.append(edited_node)
 
 
-def logstash(parser, xml_parent, data):
+def logstash(registry, xml_parent, data):
     """yaml: logstash build wrapper
     Dump the Jenkins console output to Logstash
     Requires the Jenkins :jenkins-wiki:`logstash plugin <Logstash+Plugin>`.
 
-    :arg use-redis: Boolean to use Redis. (default: true)
+    :arg use-redis: Boolean to use Redis. (default true)
     :arg redis: Redis config params
 
         :Parameter: * **host** (`str`) Redis hostname\
@@ -1468,41 +1490,42 @@ def logstash(parser, xml_parent, data):
         key_sub_element.text = str(redis_config.get('key', 'logstash'))
 
 
-def mongo_db(parser, xml_parent, data):
+def mongo_db(registry, xml_parent, data):
     """yaml: mongo-db build wrapper
     Initalizes a MongoDB database while running the build.
     Requires the Jenkins :jenkins-wiki:`MongoDB plugin <MongoDB+Plugin>`.
 
-    :arg str name: The name of the MongoDB install to use
-    :arg str data-directory: Data directory for the server (optional)
-    :arg int port: Port for the server (optional)
-    :arg str startup-params: Startup parameters for the server (optional)
+    :arg str name: The name of the MongoDB install to use (required)
+    :arg str data-directory: Data directory for the server (default '')
+    :arg int port: Port for the server (default '')
+    :arg str startup-params: Startup parameters for the server (default '')
     :arg int start-timeout: How long to wait for the server to start in
-        milliseconds. 0 means no timeout. (default '0')
+        milliseconds. 0 means no timeout. (default 0)
 
-    Example:
+    Full Example:
 
-    .. literalinclude:: /../../tests/wrappers/fixtures/mongo-db001.yaml
+    .. literalinclude:: /../../tests/wrappers/fixtures/mongo-db-full.yaml
 
+    Minimal Example:
+
+    .. literalinclude:: /../../tests/wrappers/fixtures/mongo-db-minimal.yaml
     """
     mongodb = XML.SubElement(xml_parent,
                              'org.jenkinsci.plugins.mongodb.'
                              'MongoBuildWrapper')
     mongodb.set('plugin', 'mongodb')
 
-    if not str(data.get('name', '')):
-        raise JenkinsJobsException('The mongo install name must be specified.')
-    XML.SubElement(mongodb, 'mongodbName').text = str(data.get('name', ''))
-    XML.SubElement(mongodb, 'port').text = str(data.get('port', ''))
-    XML.SubElement(mongodb, 'dbpath').text = str(data.get(
-        'data-directory', ''))
-    XML.SubElement(mongodb, 'parameters').text = str(data.get(
-        'startup-params', ''))
-    XML.SubElement(mongodb, 'startTimeout').text = str(data.get(
-        'start-timeout', '0'))
+    mapping = [
+        ('name', 'mongodbName', None),
+        ('port', 'port', ''),
+        ('data-directory', 'dbpath', ''),
+        ('startup-params', 'parameters', ''),
+        ('start-timeout', 'startTimeout', 0),
+    ]
+    convert_mapping_to_xml(mongodb, data, mapping, fail_required=True)
 
 
-def delivery_pipeline(parser, xml_parent, data):
+def delivery_pipeline(registry, xml_parent, data):
     """yaml: delivery-pipeline
     If enabled the job will create a version based on the template.
     The version will be set to the environment variable PIPELINE_VERSION and
@@ -1512,25 +1535,34 @@ def delivery_pipeline(parser, xml_parent, data):
     <Delivery+Pipeline+Plugin>`.
 
     :arg str version-template: Template for generated version e.g
-        1.0.${BUILD_NUMBER} (default: '')
+        1.0.${BUILD_NUMBER} (default '')
     :arg bool set-display-name: Set the generated version as the display name
-        for the build (default: false)
+        for the build (default false)
 
-    Example:
+    Minimal Example:
 
-    .. literalinclude:: /../../tests/wrappers/fixtures/delivery-pipeline1.yaml
+    .. literalinclude::
+       /../../tests/wrappers/fixtures/delivery-pipeline-minimal.yaml
+       :language: yaml
 
+    Full Example:
+
+    .. literalinclude::
+       /../../tests/wrappers/fixtures/delivery-pipeline-full.yaml
+       :language: yaml
     """
-    pvc = XML.SubElement(xml_parent,
-                         'se.diabol.jenkins.pipeline.'
-                         'PipelineVersionContributor')
-    XML.SubElement(pvc, 'versionTemplate').text = data.get(
-        'version-template', '')
-    XML.SubElement(pvc, 'updateDisplayName').text = str(data.get(
-        'set-display-name', False)).lower()
+    pvc = XML.SubElement(
+        xml_parent, 'se.diabol.jenkins.pipeline.PipelineVersionContributor')
+    pvc.set('plugin', 'delivery-pipeline-plugin')
+
+    mapping = [
+        ('version-template', 'versionTemplate', ''),
+        ('set-display-name', 'updateDisplayName', False),
+    ]
+    convert_mapping_to_xml(pvc, data, mapping, fail_required=True)
 
 
-def matrix_tie_parent(parser, xml_parent, data):
+def matrix_tie_parent(registry, xml_parent, data):
     """yaml: matrix-tie-parent
     Tie parent to a node.
     Requires the Jenkins :jenkins-wiki:`Matrix Tie Parent Plugin
@@ -1550,7 +1582,7 @@ def matrix_tie_parent(parser, xml_parent, data):
     XML.SubElement(mtp, 'labelName').text = data['node']
 
 
-def exclusion(parser, xml_parent, data):
+def exclusion(registry, xml_parent, data):
     """yaml: exclusion
     Add a resource to use for critical sections to establish a mutex on. If
     another job specifies the same resource, the second job will wait for the
@@ -1577,7 +1609,7 @@ def exclusion(parser, xml_parent, data):
         XML.SubElement(dit, 'name').text = str(resource).upper()
 
 
-def ssh_agent_credentials(parser, xml_parent, data):
+def ssh_agent_credentials(registry, xml_parent, data):
     """yaml: ssh-agent-credentials
     Sets up the user for the ssh agent plugin for jenkins.
 
@@ -1630,12 +1662,13 @@ def ssh_agent_credentials(parser, xml_parent, data):
             entry_xml = XML.SubElement(entry_xml, 'credentialIds')
             xml_key = 'string'
         if 'user' in data:
-            logger.warn("Both 'users' and 'user' parameters specified for "
-                        "ssh-agent-credentials. 'users' is used, 'user' is "
-                        "ignored.")
+            logger.warning(
+                "Both 'users' and 'user' parameters specified for "
+                "ssh-agent-credentials. 'users' is used, 'user' is "
+                "ignored.")
     elif 'user' in data:
-        logger.warn("The 'user' param has been deprecated, "
-                    "use the 'users' param instead.")
+        logger.warning("The 'user' param has been deprecated, "
+                       "use the 'users' param instead.")
         user_list.append(data['user'])
     else:
         raise JenkinsJobsException("Missing 'user' or 'users' parameter "
@@ -1645,7 +1678,7 @@ def ssh_agent_credentials(parser, xml_parent, data):
         XML.SubElement(entry_xml, xml_key).text = user
 
 
-def credentials_binding(parser, xml_parent, data):
+def credentials_binding(registry, xml_parent, data):
     """yaml: credentials-binding
     Binds credentials to environment variables using the credentials binding
     plugin for jenkins.
@@ -1654,12 +1687,16 @@ def credentials_binding(parser, xml_parent, data):
     <Credentials+Binding+Plugin>` version 1.1 or greater.
 
     :arg list binding-type: List of each bindings to create.  Bindings may be
-      of type `zip-file`, `file`, `username-password`, `text` or
-      `username-password-separated`.
+      of type `zip-file`, `file`, `username-password`, `text`,
+      `username-password-separated` or `amazon-web-services`.
       username-password sets a variable to the username and password given in
       the credentials, separated by a colon.
       username-password-separated sets one variable to the username and one
       variable to the password given in the credentials.
+      amazon-web-services sets one variable to the access key and one
+      variable to the secret access key. Requires the
+      :jenkins-wiki:`AWS Credentials Plugin <CloudBees+AWS+Credentials+Plugin>`
+      .
 
         :Parameters: * **credential-id** (`str`) UUID of the credential being
                        referenced
@@ -1671,6 +1708,12 @@ def credentials_binding(parser, xml_parent, data):
                      * **password** (`str`) Environment variable for the
                        password (Required for binding-type
                        username-password-separated)
+                     * **access-key** (`str`) Environment variable for the
+                       access key (Required for binding-type
+                       amazon-web-services)
+                     * **secret-key** (`str`) Environment variable for the
+                       access secret key (Required for binding-type
+                       amazon-web-services)
 
     Example:
 
@@ -1699,7 +1742,10 @@ def credentials_binding(parser, xml_parent, data):
         'username-password-separated': 'org.jenkinsci.plugins.'
                                        'credentialsbinding.impl.'
                                        'UsernamePasswordMultiBinding',
-        'text': 'org.jenkinsci.plugins.credentialsbinding.impl.StringBinding'
+        'text': 'org.jenkinsci.plugins.credentialsbinding.impl.StringBinding',
+        'amazon-web-services':
+            'com.cloudbees.jenkins.plugins.awscredentials'
+            '.AmazonWebServicesCredentialsBinding'
     }
     if not data:
         raise JenkinsJobsException('At least one binding-type must be '
@@ -1721,6 +1767,14 @@ def credentials_binding(parser, xml_parent, data):
                                    ).text = params['password']
                 except KeyError as e:
                     raise MissingAttributeError(e.args[0])
+            elif binding_type == 'amazon-web-services':
+                try:
+                    XML.SubElement(binding_xml, 'accessKeyVariable'
+                                   ).text = params['access-key']
+                    XML.SubElement(binding_xml, 'secretKeyVariable'
+                                   ).text = params['secret-key']
+                except KeyError as e:
+                    raise MissingAttributeError(e.args[0])
             else:
                 variable_xml = XML.SubElement(binding_xml, 'variable')
                 variable_xml.text = params.get('variable')
@@ -1728,7 +1782,7 @@ def credentials_binding(parser, xml_parent, data):
             credential_xml.text = params.get('credential-id')
 
 
-def custom_tools(parser, xml_parent, data):
+def custom_tools(registry, xml_parent, data):
     """yaml: custom-tools
     Requires the Jenkins :jenkins-wiki:`Custom Tools Plugin
     <Custom+Tools+Plugin>`.
@@ -1766,7 +1820,7 @@ def custom_tools(parser, xml_parent, data):
                    'convertHomesToUppercase').text = convert_home
 
 
-def nodejs_installator(parser, xml_parent, data):
+def nodejs_installator(registry, xml_parent, data):
     """yaml: nodejs-installator
     Requires the Jenkins :jenkins-wiki:`NodeJS Plugin
     <NodeJS+Plugin>`.
@@ -1788,37 +1842,44 @@ def nodejs_installator(parser, xml_parent, data):
         raise MissingAttributeError(e.args[0])
 
 
-def xvnc(parser, xml_parent, data):
+def xvnc(registry, xml_parent, data):
     """yaml: xvnc
     Enable xvnc during the build.
     Requires the Jenkins :jenkins-wiki:`xvnc plugin <Xvnc+Plugin>`.
 
-    :arg bool screenshot: Take screenshot upon build completion
-                          (default: false)
-    :arg bool xauthority: Create a dedicated Xauthority file per build
-                          (default: true)
+    :arg bool screenshot: Take screenshot upon build completion (default false)
+    :arg bool xauthority: Create a dedicated Xauthority file per build (default
+        true)
 
-    Example:
+    Full Example:
 
-    .. literalinclude:: /../../tests/wrappers/fixtures/xvnc001.yaml
+    .. literalinclude:: /../../tests/wrappers/fixtures/xvnc-full.yaml
+       :language: yaml
 
+    Minimal Example:
+
+    .. literalinclude:: /../../tests/wrappers/fixtures/xvnc-minimal.yaml
+       :language: yaml
     """
     xwrapper = XML.SubElement(xml_parent,
                               'hudson.plugins.xvnc.Xvnc')
-    XML.SubElement(xwrapper, 'takeScreenshot').text = str(
-        data.get('screenshot', False)).lower()
-    XML.SubElement(xwrapper, 'useXauthority').text = str(
-        data.get('xauthority', True)).lower()
+    xwrapper.set('plugin', 'xvnc')
+
+    mapping = [
+        ('screenshot', 'takeScreenshot', False),
+        ('xauthority', 'useXauthority', True),
+    ]
+    convert_mapping_to_xml(xwrapper, data, mapping, fail_required=True)
 
 
-def job_log_logger(parser, xml_parent, data):
+def job_log_logger(registry, xml_parent, data):
     """yaml: job-log-logger
     Enable writing the job log to the underlying logging system.
     Requires the Jenkins :jenkins-wiki:`Job Log Logger plugin
     <Job+Log+Logger+Plugin>`.
 
     :arg bool suppress-empty: Suppress empty log messages
-                              (default: true)
+                              (default true)
 
     Example:
 
@@ -1832,68 +1893,63 @@ def job_log_logger(parser, xml_parent, data):
         data.get('suppress-empty', True)).lower()
 
 
-def xvfb(parser, xml_parent, data):
+def xvfb(registry, xml_parent, data):
     """yaml: xvfb
     Enable xvfb during the build.
     Requires the Jenkins :jenkins-wiki:`Xvfb Plugin <Xvfb+Plugin>`.
 
-    :arg str installation-name: The name of the Xvfb tool instalation
-                                (default: default)
+    :arg str installation-name: The name of the Xvfb tool instalation (default
+        'default')
     :arg bool auto-display-name: Uses the -displayfd option of Xvfb by which it
-                                 chooses it's own display name
-                                 (default: false)
+        chooses it's own display name (default false)
     :arg str display-name: Ordinal of the display Xvfb will be running on, if
-                           left empty choosen based on current build executor
-                           number (optional)
+        left empty choosen based on current build executor number (default '')
     :arg str assigned-labels: If you want to start Xvfb only on specific nodes
-                              specify its name or label (optional)
+        specify its name or label (default '')
     :arg bool parallel-build: When running multiple Jenkins nodes on the same
-                              machine this setting influences the display
-                              number generation (default: false)
+        machine this setting influences the display number generation (default
+        false)
     :arg int timeout: A timeout of given seconds to wait before returning
-                      control to the job (default: 0)
-    :arg str screen: Resolution and color depth. (default: 1024x768x24)
-    :arg str display-name-offset: Offset for display names. (default: 1)
+        control to the job (default 0)
+    :arg str screen: Resolution and color depth. (default '1024x768x24')
+    :arg int display-name-offset: Offset for display names. (default 1)
     :arg str additional-options: Additional options to be added with the
-                                 options above to the Xvfb command line
-                                 (optional)
+        options above to the Xvfb command line (default '')
     :arg bool debug: If Xvfb output should appear in console log of this job
-                     (default: false)
+        (default false)
     :arg bool shutdown-with-build: Should the display be kept until the whole
-                                   job ends (default: false)
+        job ends (default false)
 
-    Example:
+    Full Example:
 
-    .. literalinclude:: /../../tests/wrappers/fixtures/xvfb001.yaml
+    .. literalinclude:: /../../tests/wrappers/fixtures/xvfb-full.yaml
+       :language: yaml
 
+    Minimal Example:
+
+    .. literalinclude:: /../../tests/wrappers/fixtures/xvfb-minimal.yaml
+       :language: yaml
     """
     xwrapper = XML.SubElement(xml_parent,
                               'org.jenkinsci.plugins.xvfb.XvfbBuildWrapper')
-    XML.SubElement(xwrapper, 'installationName').text = str(data.get(
-        'installation-name', 'default'))
-    XML.SubElement(xwrapper, 'autoDisplayName').text = str(data.get(
-        'auto-display-name', False)).lower()
-    if 'display-name' in data:
-        XML.SubElement(xwrapper, 'displayName').text = str(data.get(
-            'display-name', ''))
-    XML.SubElement(xwrapper, 'assignedLabels').text = str(data.get(
-        'assigned-labels', ''))
-    XML.SubElement(xwrapper, 'parallelBuild').text = str(data.get(
-        'parallel-build', False)).lower()
-    XML.SubElement(xwrapper, 'timeout').text = str(data.get('timeout', '0'))
-    XML.SubElement(xwrapper, 'screen').text = str(data.get(
-        'screen', '1024x768x24'))
-    XML.SubElement(xwrapper, 'displayNameOffset').text = str(data.get(
-        'display-name-offset', '1'))
-    XML.SubElement(xwrapper, 'additionalOptions').text = str(data.get(
-        'additional-options', ''))
-    XML.SubElement(xwrapper, 'debug').text = str(data.get(
-        'debug', False)).lower()
-    XML.SubElement(xwrapper, 'shutdownWithBuild').text = str(data.get(
-        'shutdown-with-build', False)).lower()
+
+    mapping = [
+        ('installation-name', 'installationName', 'default'),
+        ('auto-display-name', 'autoDisplayName', False),
+        ('display-name', 'displayName', ''),
+        ('assigned-labels', 'assignedLabels', ''),
+        ('parallel-build', 'parallelBuild', False),
+        ('timeout', 'timeout', 0),
+        ('screen', 'screen', '1024x768x24'),
+        ('display-name-offset', 'displayNameOffset', 1),
+        ('additional-options', 'additionalOptions', ''),
+        ('debug', 'debug', False),
+        ('shutdown-with-build', 'shutdownWithBuild', False),
+    ]
+    convert_mapping_to_xml(xwrapper, data, mapping, fail_required=True)
 
 
-def android_emulator(parser, xml_parent, data):
+def android_emulator(registry, xml_parent, data):
     """yaml: android-emulator
     Automates many Android development tasks including SDK installation,
     build file generation, emulator creation and launch,
@@ -1979,7 +2035,7 @@ def android_emulator(parser, xml_parent, data):
     XML.SubElement(root, 'executable').text = str(data.get('exe', ''))
 
 
-def artifactory_maven(parser, xml_parent, data):
+def artifactory_maven(registry, xml_parent, data):
     """yaml: artifactory-maven
     Wrapper for non-Maven projects. Requires the
     :jenkins-wiki:`Artifactory Plugin <Artifactory+Plugin>`
@@ -2024,13 +2080,13 @@ def artifactory_maven(parser, xml_parent, data):
                 'release-repo-key', '')
 
 
-def artifactory_generic(parser, xml_parent, data):
+def artifactory_generic(registry, xml_parent, data):
     """yaml: artifactory-generic
     Wrapper for non-Maven projects. Requires the
     :jenkins-wiki:`Artifactory Plugin <Artifactory+Plugin>`
 
     :arg str url: URL of the Artifactory server. e.g.
-        https://www.jfrog.com/artifactory/ (default: '')
+        https://www.jfrog.com/artifactory/ (default '')
     :arg str name: Artifactory user with permissions use for
         connected to the selected Artifactory Server
         (default '')
@@ -2050,12 +2106,12 @@ def artifactory_generic(parser, xml_parent, data):
         artifacts in addition to the default ones: build.name, build.number,
         and vcs.revision (default [])
     :arg bool deploy-build-info: Deploy jenkins build metadata with
-        artifacts to Artifactory (default False)
+        artifacts to Artifactory (default false)
     :arg bool env-vars-include: Include environment variables accessible by
         the build process. Jenkins-specific env variables are always included.
         Use the env-vars-include-patterns and env-vars-exclude-patterns to
         filter the environment variables published to artifactory.
-        (default False)
+        (default false)
     :arg list env-vars-include-patterns: List of environment variable patterns
         for including env vars as part of the published build info. Environment
         variables may contain the * and the ? wildcards (default [])
@@ -2063,9 +2119,9 @@ def artifactory_generic(parser, xml_parent, data):
         that determine the env vars excluded from the published build info
         (default [])
     :arg bool discard-old-builds:
-        Remove older build info from Artifactory (default False)
+        Remove older build info from Artifactory (default false)
     :arg bool discard-build-artifacts:
-        Remove older build artifacts from Artifactory (default False)
+        Remove older build artifacts from Artifactory (default false)
 
     Example:
 
@@ -2083,7 +2139,7 @@ def artifactory_generic(parser, xml_parent, data):
     artifactory_common_details(details, data)
 
     # Get plugin information to maintain backwards compatibility
-    info = parser.registry.get_plugin_info('artifactory')
+    info = registry.get_plugin_info('artifactory')
     version = pkg_resources.parse_version(info.get('version', '0'))
 
     if version >= pkg_resources.parse_version('2.3.0'):
@@ -2120,46 +2176,46 @@ def artifactory_generic(parser, xml_parent, data):
     artifactory_env_vars_patterns(artifactory, data)
 
 
-def artifactory_maven_freestyle(parser, xml_parent, data):
+def artifactory_maven_freestyle(registry, xml_parent, data):
     """yaml: artifactory-maven-freestyle
     Wrapper for Free Stype projects. Requires the Artifactory plugin.
     Requires :jenkins-wiki:`Artifactory Plugin <Artifactory+Plugin>`
 
     :arg str url: URL of the Artifactory server. e.g.
-        https://www.jfrog.com/artifactory/ (default: '')
+        https://www.jfrog.com/artifactory/ (default '')
     :arg str name: Artifactory user with permissions use for
         connected to the selected Artifactory Server (default '')
     :arg str release-repo-key: Release repository name (default '')
     :arg str snapshot-repo-key: Snapshots repository name (default '')
     :arg bool publish-build-info: Push build metadata with artifacts
-        (default False)
+        (default false)
     :arg bool discard-old-builds:
-        Remove older build info from Artifactory (default True)
+        Remove older build info from Artifactory (default true)
     :arg bool discard-build-artifacts:
-        Remove older build artifacts from Artifactory (default False)
+        Remove older build artifacts from Artifactory (default false)
     :arg bool include-env-vars: Include all environment variables
         accessible by the build process. Jenkins-specific env variables
-        are always included (default False)
+        are always included (default false)
     :arg bool run-checks: Run automatic license scanning check after the
-        build is complete (default False)
+        build is complete (default false)
     :arg bool include-publish-artifacts: Include the build's published
         module artifacts in the license violation checks if they are
         also used as dependencies for other modules in this build
-        (default False)
+        (default false)
     :arg bool license-auto-discovery: Tells Artifactory not to try
         and automatically analyze and tag the build's dependencies
-        with license information upon deployment (default True)
+        with license information upon deployment (default true)
     :arg bool enable-issue-tracker-integration: When the Jenkins
         JIRA plugin is enabled, synchronize information about JIRA
         issues to Artifactory and attach issue information to build
-        artifacts (default False)
+        artifacts (default false)
     :arg bool aggregate-build-issues: When the Jenkins JIRA plugin
         is enabled, include all issues from previous builds up to the
         latest build status defined in "Aggregation Build Status"
-        (default False)
+        (default false)
     :arg bool filter-excluded-artifacts-from-build: Add the excluded
         files to the excludedArtifacts list and remove them from the
-        artifacts list in the build info (default False)
+        artifacts list in the build info (default false)
     :arg str scopes:  A list of dependency scopes/configurations to run
         license violation checks on. If left empty all dependencies from
         all scopes will be checked (default '')
@@ -2180,23 +2236,23 @@ def artifactory_maven_freestyle(parser, xml_parent, data):
         all dependencies from all scopes will be checked (default '')
     :arg bool black-duck-run-checks: Automatic Black Duck Code Center
         compliance checks will occur after the build completes
-        (default False)
+        (default false)
     :arg bool black-duck-include-published-artifacts: Include the build's
         published module artifacts in the license violation checks if they
         are also used as dependencies for other modules in this build
-        (default False)
+        (default false)
     :arg bool auto-create-missing-component-requests: Auto create
         missing components in Black Duck Code Center application after
         the build is completed and deployed in Artifactory
-        (default True)
+        (default true)
     :arg bool auto-discard-stale-component-requests: Auto discard
         stale components in Black Duck Code Center application after
         the build is completed and deployed in Artifactory
-        (default True)
+        (default true)
     :arg bool deploy-artifacts: Push artifacts to the Artifactory
         Server. The specific artifacts to push are controlled using
         the deployment-include-patterns and deployment-exclude-patterns.
-        (default True)
+        (default true)
     :arg list deployment-include-patterns: List of patterns for including
         build artifacts to publish to artifactory. (default[]')
     :arg list deployment-exclude-patterns: List of patterns
@@ -2206,7 +2262,7 @@ def artifactory_maven_freestyle(parser, xml_parent, data):
         accessible by the build process. Jenkins-specific env variables
         are always included. Environment variables can be filtered using
         the env-vars-include-patterns nad env-vars-exclude-patterns.
-        (default False)
+        (default false)
     :arg list env-vars-include-patterns: List of environment variable patterns
         that will be included as part of the published build info. Environment
         variables may contain the * and the ? wildcards (default [])
@@ -2264,14 +2320,113 @@ def artifactory_maven_freestyle(parser, xml_parent, data):
     artifactory_optional_props(artifactory, data, 'wrappers')
 
 
+def maven_release(registry, xml_parent, data):
+    """yaml: maven-release
+    Wrapper for Maven projects
+    Requires :jenkins-wiki:`M2 Release Plugin <M2+Release+Plugin>`
+
+    :arg str release-goals: Release goals and options (default '')
+    :arg str dry-run-goals: DryRun goals and options (default '')
+    :arg int num-successful-builds: Number of successful release builds to keep
+        (default 1)
+    :arg bool select-custom-scm-comment-prefix: Preselect 'Specify custom SCM
+        comment prefix' (default false)
+    :arg bool select-append-jenkins-username: Preselect 'Append Jenkins
+        Username' (default false)
+    :arg bool select-scm-credentials: Preselect 'Specify SCM login/password'
+        (default false)
+    :arg str release-env-var: Release environment variable (default '')
+    :arg str scm-user-env-var: SCM username environment variable (default '')
+    :arg str scm-password-env-var: SCM password environment variable
+        (default '')
+
+    Example:
+
+    .. literalinclude:: /../../tests/wrappers/fixtures/maven-release001.yaml
+       :language: yaml
+
+    """
+    mvn_release = XML.SubElement(xml_parent,
+                                 'org.jvnet.hudson.plugins.m2release.'
+                                 'M2ReleaseBuildWrapper')
+
+    mapping = [
+        ('release-goals', 'releaseGoals', ''),
+        ('dry-run-goals', 'dryRunGoals', ''),
+        ('num-successful-builds', 'numberOfReleaseBuildsToKeep', 1),
+        ('select-custom-scm-comment-prefix', 'selectCustomScmCommentPrefix',
+         False),
+        ('select-append-jenkins-username', 'selectAppendHudsonUsername',
+         False),
+        ('select-scm-credentials', 'selectScmCredentials', False),
+        ('release-env-var', 'releaseEnvVar', ''),
+        ('scm-user-env-var', 'scmUserEnvVar', ''),
+        ('scm-password-env-var', 'scmPasswordEnvVar', ''),
+    ]
+    convert_mapping_to_xml(mvn_release, data, mapping, fail_required=True)
+
+
+def version_number(parser, xml_parent, data):
+    """yaml: version-number
+    Generate a version number for the build using a format string. See the
+    wiki page for more detailed descriptions of options.
+
+    Requires the Jenkins :jenkins-wiki:`version number plugin
+    <Version+Number+Plugin>`.
+
+    :arg str variable-name: Name of environment variable to assign version
+        number to (required)
+    :arg str format-string: Format string used to generate version number
+        (required)
+    :arg bool skip-failed-builds: If the build fails, DO NOT increment any
+        auto-incrementing component of the version number (default: false)
+    :arg bool display-name: Use the version number for the build display
+        name (default: false)
+    :arg str start-date: The date the project began as a UTC timestamp
+        (default 1970-1-1 00:00:00.0 UTC)
+    :arg int builds-today: The number of builds that have been executed
+        today (optional)
+    :arg int builds-this-month: The number of builds that have been executed
+        since the start of the month (optional)
+    :arg int builds-this-year: The number of builds that have been executed
+        since the start of the year (optional)
+    :arg int builds-all-time: The number of builds that have been executed
+        since the start of the project (optional)
+
+    Example:
+
+    .. literalinclude:: /../../tests/wrappers/fixtures/version-number001.yaml
+       :language: yaml
+
+    """
+    version_number = XML.SubElement(
+        xml_parent, 'org.jvnet.hudson.tools.versionnumber.VersionNumberBuilder'
+    )
+
+    mapping = [
+        # option, xml name, default value
+        ("variable-name", 'environmentVariableName', None),
+        ("format-string", 'versionNumberString', None),
+        ("skip-failed-builds", 'skipFailedBuilds', False),
+        ("display-name", 'useAsBuildDisplayName', False),
+        ("start-date", 'projectStartDate', '1970-1-1 00:00:00.0 UTC'),
+        ("builds-today", 'oBuildsToday', '-1'),
+        ("builds-this-month", 'oBuildsThisMonth', '-1'),
+        ("builds-this-year", 'oBuildsThisYear', '-1'),
+        ("builds-all-time", 'oBuildsAllTime', '-1'),
+    ]
+
+    convert_mapping_to_xml(version_number, data, mapping, fail_required=True)
+
+
 class Wrappers(jenkins_jobs.modules.base.Base):
     sequence = 80
 
     component_type = 'wrapper'
     component_list_type = 'wrappers'
 
-    def gen_xml(self, parser, xml_parent, data):
+    def gen_xml(self, xml_parent, data):
         wrappers = XML.SubElement(xml_parent, 'buildWrappers')
 
         for wrap in data.get('wrappers', []):
-            self.registry.dispatch('wrapper', parser, wrappers, wrap)
+            self.registry.dispatch('wrapper', wrappers, wrap)

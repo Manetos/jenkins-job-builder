@@ -20,15 +20,17 @@ import fnmatch
 import io
 import itertools
 import logging
-import pkg_resources
+import os
 
 from jenkins_jobs.constants import MAGIC_MANAGE_STRING
 from jenkins_jobs.errors import JenkinsJobsException
 from jenkins_jobs.formatter import deep_format
 import jenkins_jobs.local_yaml as local_yaml
-from jenkins_jobs.registry import ModuleRegistry
 from jenkins_jobs import utils
-from jenkins_jobs.xml_config import XmlJob
+
+__all__ = [
+    "YamlParser"
+]
 
 logger = logging.getLogger(__name__)
 
@@ -70,29 +72,66 @@ def combination_matches(combination, match_combinations):
 
 
 class YamlParser(object):
-    def __init__(self, config=None, plugins_info=None):
+    def __init__(self, jjb_config=None):
         self.data = {}
         self.jobs = []
-        self.xml_jobs = []
-        self.config = config
-        self.registry = ModuleRegistry(self.config, plugins_info)
-        self.path = ["."]
-        if self.config:
-            if config.has_section('job_builder') and \
-                    config.has_option('job_builder', 'include_path'):
-                self.path = config.get('job_builder',
-                                       'include_path').split(':')
-        self.keep_desc = self.get_keep_desc()
+        self.views = []
 
-    def get_keep_desc(self):
-        keep_desc = False
-        if self.config and self.config.has_section('job_builder') and \
-                self.config.has_option('job_builder', 'keep_descriptions'):
-            keep_desc = self.config.getboolean('job_builder',
-                                               'keep_descriptions')
-        return keep_desc
+        self.jjb_config = jjb_config
+        self.keep_desc = jjb_config.yamlparser['keep_descriptions']
+        self.path = jjb_config.yamlparser['include_path']
 
-    def parse_fp(self, fp):
+    def load_files(self, fn):
+
+        # handle deprecated behavior, and check that it's not a file like
+        # object as these may implement the '__iter__' attribute.
+        if not hasattr(fn, '__iter__') or hasattr(fn, 'read'):
+            logger.warning(
+                'Passing single elements for the `fn` argument in '
+                'Builder.load_files is deprecated. Please update your code '
+                'to use a list as support for automatic conversion will be '
+                'removed in a future version.')
+            fn = [fn]
+
+        files_to_process = []
+        for path in fn:
+            if not hasattr(path, 'read') and os.path.isdir(path):
+                files_to_process.extend([os.path.join(path, f)
+                                         for f in os.listdir(path)
+                                         if (f.endswith('.yml')
+                                             or f.endswith('.yaml'))])
+            else:
+                files_to_process.append(path)
+
+        # symlinks used to allow loading of sub-dirs can result in duplicate
+        # definitions of macros and templates when loading all from top-level
+        unique_files = []
+        for f in files_to_process:
+            if hasattr(f, 'read'):
+                unique_files.append(f)
+                continue
+            rpf = os.path.realpath(f)
+            if rpf not in unique_files:
+                unique_files.append(rpf)
+            else:
+                logger.warning("File '%s' already added as '%s', ignoring "
+                               "reference to avoid duplicating yaml "
+                               "definitions." % (f, rpf))
+
+        for in_file in unique_files:
+            # use of ask-for-permissions instead of ask-for-forgiveness
+            # performs better when low use cases.
+            if hasattr(in_file, 'name'):
+                fname = in_file.name
+            else:
+                fname = in_file
+            logger.debug("Parsing YAML file {0}".format(fname))
+            if hasattr(in_file, 'read'):
+                self._parse_fp(in_file)
+            else:
+                self.parse(in_file)
+
+    def _parse_fp(self, fp):
         # wrap provided file streams to ensure correct encoding used
         data = local_yaml.load(utils.wrap_stream(fp), search_path=self.path)
         if data:
@@ -125,33 +164,32 @@ class YamlParser(object):
 
     def parse(self, fn):
         with io.open(fn, 'r', encoding='utf-8') as fp:
-            self.parse_fp(fp)
+            self._parse_fp(fp)
 
     def _handle_dups(self, message):
 
-        if not (self.config and self.config.has_section('job_builder') and
-                self.config.getboolean('job_builder', 'allow_duplicates')):
+        if not self.jjb_config.yamlparser['allow_duplicates']:
             logger.error(message)
             raise JenkinsJobsException(message)
         else:
-            logger.warn(message)
+            logger.warning(message)
 
-    def getJob(self, name):
+    def _getJob(self, name):
         job = self.data.get('job', {}).get(name, None)
         if not job:
             return job
-        return self.applyDefaults(job)
+        return self._applyDefaults(job)
 
-    def getJobGroup(self, name):
+    def _getJobGroup(self, name):
         return self.data.get('job-group', {}).get(name, None)
 
-    def getJobTemplate(self, name):
+    def _getJobTemplate(self, name):
         job = self.data.get('job-template', {}).get(name, None)
         if not job:
             return job
-        return self.applyDefaults(job)
+        return self._applyDefaults(job)
 
-    def applyDefaults(self, data, override_dict=None):
+    def _applyDefaults(self, data, override_dict=None):
         if override_dict is None:
             override_dict = {}
 
@@ -171,22 +209,22 @@ class YamlParser(object):
         newdata.update(data)
         return newdata
 
-    def formatDescription(self, job):
+    def _formatDescription(self, job):
         if self.keep_desc:
             description = job.get("description", None)
         else:
             description = job.get("description", '')
         if description is not None:
             job["description"] = description + \
-                self.get_managed_string().lstrip()
+                self._get_managed_string().lstrip()
 
-    def expandYaml(self, jobs_glob=None):
+    def expandYaml(self, registry, jobs_glob=None):
         changed = True
         while changed:
             changed = False
-            for module in self.registry.modules:
+            for module in registry.modules:
                 if hasattr(module, 'handle_data'):
-                    if module.handle_data(self):
+                    if module.handle_data(self.data):
                         changed = True
 
         for job in self.data.get('job', {}).values():
@@ -194,9 +232,15 @@ class YamlParser(object):
                 logger.debug("Ignoring job {0}".format(job['name']))
                 continue
             logger.debug("Expanding job '{0}'".format(job['name']))
-            job = self.applyDefaults(job)
-            self.formatDescription(job)
+            job = self._applyDefaults(job)
+            self._formatDescription(job)
             self.jobs.append(job)
+
+        for view in self.data.get('view', {}).values():
+            logger.debug("Expanding view '{0}'".format(view['name']))
+            self._formatDescription(view)
+            self.views.append(view)
+
         for project in self.data.get('project', {}).values():
             logger.debug("Expanding project '{0}'".format(project['name']))
             # use a set to check for duplicate job references in projects
@@ -210,17 +254,17 @@ class YamlParser(object):
                 else:
                     jobname = jobspec
                     jobparams = {}
-                job = self.getJob(jobname)
+                job = self._getJob(jobname)
                 if job:
                     # Just naming an existing defined job
                     if jobname in seen:
                         self._handle_dups("Duplicate job '{0}' specified "
-                                          "for project '{1}'".format(
-                                              jobname, project['name']))
+                                          "for project '{1}'"
+                                          .format(jobname, project['name']))
                     seen.add(jobname)
                     continue
                 # see if it's a job group
-                group = self.getJobGroup(jobname)
+                group = self._getJobGroup(jobname)
                 if group:
                     for group_jobspec in group['jobs']:
                         if isinstance(group_jobspec, dict):
@@ -231,7 +275,7 @@ class YamlParser(object):
                         else:
                             group_jobname = group_jobspec
                             group_jobparams = {}
-                        job = self.getJob(group_jobname)
+                        job = self._getJob(group_jobname)
                         if job:
                             if group_jobname in seen:
                                 self._handle_dups(
@@ -240,26 +284,24 @@ class YamlParser(object):
                                                            project['name']))
                             seen.add(group_jobname)
                             continue
-                        template = self.getJobTemplate(group_jobname)
+                        template = self._getJobTemplate(group_jobname)
                         # Allow a group to override parameters set by a project
-                        d = {}
-                        d.update(project)
+                        d = type(project)(project)
                         d.update(jobparams)
                         d.update(group)
                         d.update(group_jobparams)
                         # Except name, since the group's name is not useful
                         d['name'] = project['name']
                         if template:
-                            self.expandYamlForTemplateJob(d, template,
-                                                          jobs_glob)
+                            self._expandYamlForTemplateJob(d, template,
+                                                           jobs_glob)
                     continue
                 # see if it's a template
-                template = self.getJobTemplate(jobname)
+                template = self._getJobTemplate(jobname)
                 if template:
-                    d = {}
-                    d.update(project)
+                    d = type(project)(project)
                     d.update(jobparams)
-                    self.expandYamlForTemplateJob(d, template, jobs_glob)
+                    self._expandYamlForTemplateJob(d, template, jobs_glob)
                 else:
                     raise JenkinsJobsException("Failed to find suitable "
                                                "template named '{0}'"
@@ -273,8 +315,9 @@ class YamlParser(object):
                                   "specified".format(job['name']))
                 self.jobs.remove(job)
             seen.add(job['name'])
+        return self.jobs, self.views
 
-    def expandYamlForTemplateJob(self, project, template, jobs_glob=None):
+    def _expandYamlForTemplateJob(self, project, template, jobs_glob=None):
         dimensions = []
         template_name = template['name']
         # reject keys that are not useful during yaml expansion
@@ -294,16 +337,31 @@ class YamlParser(object):
 
         for values in itertools.product(*dimensions):
             params = copy.deepcopy(project)
-            params = self.applyDefaults(params, template)
+            params = self._applyDefaults(params, template)
 
-            expanded_values = {}
-            for (k, v) in values:
-                if isinstance(v, dict):
-                    inner_key = next(iter(v))
-                    expanded_values[k] = inner_key
-                    expanded_values.update(v[inner_key])
-                else:
-                    expanded_values[k] = v
+            try:
+                expanded_values = {}
+                for (k, v) in values:
+                    if isinstance(v, dict):
+                        inner_key = next(iter(v))
+                        expanded_values[k] = inner_key
+                        expanded_values.update(v[inner_key])
+                    else:
+                        expanded_values[k] = v
+            except TypeError:
+                project_name = project.pop('name')
+                logger.error(
+                    "Exception thrown while expanding template '%s' for "
+                    "project '%s', with expansion arguments of:\n%s\n"
+                    "Original project input variables for template:\n%s\n"
+                    "Most likely the inputs have items indented incorrectly "
+                    "to describe how they should be applied.\n\nNote yaml "
+                    "'null' is mapped to python's 'None'", template_name,
+                    project_name,
+                    "".join(local_yaml.dump({k: v}, default_flow_style=False)
+                            for (k, v) in values),
+                    local_yaml.dump(project, default_flow_style=False))
+                raise
 
             params.update(expanded_values)
             params = deep_format(params, params)
@@ -311,49 +369,23 @@ class YamlParser(object):
                 logger.debug('Excluding combination %s', str(params))
                 continue
 
-            allow_empty_variables = self.config \
-                and self.config.has_section('job_builder') \
-                and self.config.has_option(
-                    'job_builder', 'allow_empty_variables') \
-                and self.config.getboolean(
-                    'job_builder', 'allow_empty_variables')
-
             for key in template.keys():
                 if key not in params:
                     params[key] = template[key]
 
             params['template-name'] = template_name
-            expanded = deep_format(template, params, allow_empty_variables)
+            expanded = deep_format(
+                template, params,
+                self.jjb_config.yamlparser['allow_empty_variables'])
 
             job_name = expanded.get('name')
             if jobs_glob and not matches(job_name, jobs_glob):
                 continue
 
-            self.formatDescription(expanded)
+            self._formatDescription(expanded)
             self.jobs.append(expanded)
 
-    def get_managed_string(self):
+    def _get_managed_string(self):
         # The \n\n is not hard coded, because they get stripped if the
         # project does not otherwise have a description.
         return "\n\n" + MAGIC_MANAGE_STRING
-
-    def generateXML(self):
-        for job in self.jobs:
-            self.xml_jobs.append(self.getXMLForJob(job))
-
-    def getXMLForJob(self, data):
-        kind = data.get('project-type', 'freestyle')
-
-        for ep in pkg_resources.iter_entry_points(
-                group='jenkins_jobs.projects', name=kind):
-            Mod = ep.load()
-            mod = Mod(self.registry)
-            xml = mod.root_xml(data)
-            self.gen_xml(xml, data)
-            job = XmlJob(xml, data['name'])
-            return job
-
-    def gen_xml(self, xml, data):
-        for module in self.registry.modules:
-            if hasattr(module, 'gen_xml'):
-                module.gen_xml(self, xml, data)

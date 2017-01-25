@@ -97,6 +97,9 @@ Example:
       **Deprecated on jenkins >=1.637**: use the ``build-discarder``
       property instead
 
+    * **jdk**:
+      The name of the jdk to use
+
     * **raw**:
       If present, this section should contain a single **xml** entry. This XML
       will be inserted at the top-level of the :ref:`Job` definition.
@@ -114,7 +117,7 @@ class General(jenkins_jobs.modules.base.Base):
     sequence = 10
     logrotate_warn_issued = False
 
-    def gen_xml(self, parser, xml, data):
+    def gen_xml(self, xml, data):
         jdk = data.get('jdk', None)
         if jdk:
             XML.SubElement(xml, 'jdk').text = jdk
@@ -124,12 +127,15 @@ class General(jenkins_jobs.modules.base.Base):
             description = XML.SubElement(xml, 'description')
             description.text = desc_text
         XML.SubElement(xml, 'keepDependencies').text = 'false'
+
+        # Need to ensure we support the None parameter to allow disabled to
+        # remain the last setting if the user purposely adds and then removes
+        # the disabled parameter.
+        # See: http://lists.openstack.org/pipermail/openstack-infra/2016-March/003980.html  # noqa
         disabled = data.get('disabled', None)
         if disabled is not None:
-            if disabled:
-                XML.SubElement(xml, 'disabled').text = 'true'
-            else:
-                XML.SubElement(xml, 'disabled').text = 'false'
+            XML.SubElement(xml, 'disabled').text = str(disabled).lower()
+
         if 'display-name' in data:
             XML.SubElement(xml, 'displayName').text = data['display-name']
         if data.get('block-downstream'):
@@ -170,9 +176,9 @@ class General(jenkins_jobs.modules.base.Base):
 
         if 'logrotate' in data:
             if not self.logrotate_warn_issued:
-                logging.warn('logrotate is deprecated on jenkins>=1.637, use '
-                             'the property build-discarder on newer jenkins '
-                             'instead')
+                logging.warning('logrotate is deprecated on jenkins>=1.637,'
+                                ' the property build-discarder on newer'
+                                ' jenkins instead')
                 self.logrotate_warn_issued = True
 
             lr_xml = XML.SubElement(xml, 'logRotator')
@@ -187,10 +193,10 @@ class General(jenkins_jobs.modules.base.Base):
             lr_anum.text = str(logrotate.get('artifactNumToKeep', -1))
 
         if 'raw' in data:
-            raw(parser, xml, data['raw'])
+            raw(self.registry, xml, data['raw'])
 
 
-def raw(parser, xml_parent, data):
+def raw(registry, xml_parent, data):
     # documented in definition.rst since includes and docs is not working well
     # For cross cutting method like this
     root = XML.fromstring(data.get('xml'))

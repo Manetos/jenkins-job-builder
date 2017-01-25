@@ -100,10 +100,11 @@ class HipChat(jenkins_jobs.modules.base.Base):
            This is done lazily to avoid looking up the '[hipchat]' section
            unless actually required.
         """
-        if(not self.authToken):
+        jjb_config = self.registry.jjb_config
+        if not self.authToken:
             try:
-                self.authToken = self.registry.global_config.get(
-                    'hipchat', 'authtoken')
+                self.authToken = jjb_config.get_plugin_config('hipchat',
+                                                              'authtoken')
                 # Require that the authtoken is non-null
                 if self.authToken == '':
                     raise jenkins_jobs.errors.JenkinsJobsException(
@@ -113,10 +114,10 @@ class HipChat(jenkins_jobs.modules.base.Base):
                 logger.fatal("The configuration file needs a hipchat section" +
                              " containing authtoken:\n{0}".format(e))
                 sys.exit(1)
-            self.jenkinsUrl = self.registry.global_config.get('jenkins', 'url')
-            self.sendAs = self.registry.global_config.get('hipchat', 'send-as')
+            self.jenkinsUrl = jjb_config.jenkins['url']
+            self.sendAs = jjb_config.get_plugin_config('hipchat', 'send-as')
 
-    def gen_xml(self, parser, xml_parent, data):
+    def gen_xml(self, xml_parent, data):
         hipchat = data.get('hipchat')
         if not hipchat or not hipchat.get('enabled', True):
             return
@@ -125,10 +126,10 @@ class HipChat(jenkins_jobs.modules.base.Base):
         # convert for compatibility before dispatch
         if 'room' in hipchat:
             if 'rooms' in hipchat:
-                logger.warn("Ignoring deprecated 'room' as 'rooms' also "
-                            "defined.")
+                logger.warning("Ignoring deprecated 'room' as 'rooms' also "
+                               "defined.")
             else:
-                logger.warn("'room' is deprecated, please use 'rooms'")
+                logger.warning("'room' is deprecated, please use 'rooms'")
                 hipchat['rooms'] = [hipchat['room']]
 
         plugin_info = self.registry.get_plugin_info("Jenkins HipChat Plugin")
@@ -139,12 +140,11 @@ class HipChat(jenkins_jobs.modules.base.Base):
             if publishers is None:
                 publishers = XML.SubElement(xml_parent, 'publishers')
 
-            logger.warn(
+            logger.warning(
                 "'hipchat' module supports the old plugin versions <1.9, "
                 "newer versions are supported via the 'publishers' module. "
                 "Please upgrade you job definition")
-            return self.registry.dispatch('publisher', parser, publishers,
-                                          data)
+            return self.registry.dispatch('publisher', publishers, data)
         else:
             properties = xml_parent.find('properties')
             if properties is None:
@@ -160,8 +160,8 @@ class HipChat(jenkins_jobs.modules.base.Base):
         # Handle backwards compatibility 'start-notify' but all add an element
         # of standardization with notify-*
         if hipchat.get('start-notify'):
-            logger.warn("'start-notify' is deprecated, please use "
-                        "'notify-start'")
+            logger.warning("'start-notify' is deprecated, please use "
+                           "'notify-start'")
         XML.SubElement(pdefhip, 'startNotification').text = str(
             hipchat.get('notify-start', hipchat.get('start-notify',
                                                     False))).lower()
